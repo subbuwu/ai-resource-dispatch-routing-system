@@ -69,3 +69,69 @@ ENV/
 *.sqlite
 *.sqlite3
 
+# OSRM Map Data (large binary files - should not be committed)
+# Source map files
+*.osm.pbf
+*.osm
+*.pbf
+
+# Processed OSRM routing data files (generated from .osm.pbf)
+*.osrm
+*.osrm.*
+# Keep the directory structure but ignore all data files
+backend/osrm/*.osm.pbf
+backend/osrm/*.osrm
+backend/osrm/*.osrm.*
+
+# Python virtual environments (already covered but being explicit)
+venv/
+env/
+ENV/
+.venv/
+
+# Python compiled files
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# Frontend build artifacts
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+
+# Bun
+.bun/
