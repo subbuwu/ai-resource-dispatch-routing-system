@@ -32,6 +32,26 @@ const endIcon = new L.Icon({
   shadowSize: [41, 41],
 });
 
+// Relief centre icon (blue)
+const reliefCentreIcon = new L.Icon({
+  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41],
+});
+
+// Nearest relief centre icon (highlighted - orange)
+const nearestReliefCentreIcon = new L.Icon({
+  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+  iconSize: [30, 50],
+  iconAnchor: [15, 50],
+  popupAnchor: [1, -34],
+  shadowSize: [50, 50],
+});
+
 // Component to handle map click
 function MapClickHandler({ onMapClick }: { onMapClick: (lat: number, lng: number) => void }) {
   const map = useMap();
@@ -81,6 +101,24 @@ interface RouteResponse {
   coordinates: number[][];
 }
 
+interface ReliefCentre {
+  id: number;
+  name: string;
+  latitude: number;
+  longitude: number;
+  capacity: number | null;
+  status: string;
+}
+
+interface NearestReliefCentreResponse {
+  relief_centre: ReliefCentre;
+  route: RouteResponse;
+  distance: number;
+  duration: number;
+  distance_formatted: string;
+  duration_formatted: string;
+}
+
 const BACKEND_URL = "http://localhost:8000";
 
 export default function RoutePage() {
@@ -90,6 +128,33 @@ export default function RoutePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
+  
+  // Relief centre state
+  const [reliefCentres, setReliefCentres] = useState<ReliefCentre[]>([]);
+  const [nearestReliefCentre, setNearestReliefCentre] = useState<NearestReliefCentreResponse | null>(null);
+  const [loadingReliefCentres, setLoadingReliefCentres] = useState(false);
+
+  // Fetch all relief centres on page load
+  useEffect(() => {
+    const fetchReliefCentres = async () => {
+      setLoadingReliefCentres(true);
+      try {
+        const response = await fetch(`${BACKEND_URL}/relief-centres/`);
+        if (response.ok) {
+          const centres = await response.json();
+          setReliefCentres(centres);
+        } else {
+          console.error("Failed to fetch relief centres");
+        }
+      } catch (err) {
+        console.error("Error fetching relief centres:", err);
+      } finally {
+        setLoadingReliefCentres(false);
+      }
+    };
+    
+    fetchReliefCentres();
+  }, []);
 
   // Get user's current location
   useEffect(() => {
@@ -105,8 +170,8 @@ export default function RoutePage() {
         (err) => {
           setLocationError(`Location error: ${err.message}`);
           setLoading(false);
-          // Default to a location if geolocation fails (e.g., Coimbatore, India)
-          setUserLocation([10.6625, 76.9922]);
+          // Default to a location if geolocation fails (Guduvancherry area, Tamil Nadu)
+          setUserLocation([12.6939, 79.9757]);
         },
         {
           enableHighAccuracy: true,
@@ -117,12 +182,52 @@ export default function RoutePage() {
     } else {
       setLocationError("Geolocation is not supported by your browser");
       // Default location
-      setUserLocation([10.6625, 76.9922]);
+      setUserLocation([12.6939, 79.9757]);
     }
   }, []);
 
-  // Handle map click to set destination
+  // Find nearest relief centre when user location is available
+  useEffect(() => {
+    if (userLocation && reliefCentres.length > 0) {
+      const findNearest = async () => {
+        try {
+          setLoading(true);
+          const response = await fetch(`${BACKEND_URL}/relief-centres/nearest`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              latitude: userLocation[0],
+              longitude: userLocation[1],
+            }),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+          }
+
+          const data: NearestReliefCentreResponse = await response.json();
+          setNearestReliefCentre(data);
+          setRouteData(data.route);
+          setDestination([data.relief_centre.latitude, data.relief_centre.longitude]);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Failed to find nearest relief centre");
+          console.error("Nearest relief centre error:", err);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      findNearest();
+    }
+  }, [userLocation, reliefCentres.length]);
+
+  // Handle map click to set destination (manual override)
   const handleMapClick = (lat: number, lng: number) => {
+    // Clear nearest relief centre selection when manually setting destination
+    setNearestReliefCentre(null);
     setDestination([lat, lng]);
     setRouteData(null);
     setError(null);
@@ -183,6 +288,12 @@ export default function RoutePage() {
     if (!userLocation) return null;
     
     const points: L.LatLng[] = [L.latLng(userLocation[0], userLocation[1])];
+    
+    // Include all relief centres in bounds
+    reliefCentres.forEach(centre => {
+      points.push(L.latLng(centre.latitude, centre.longitude));
+    });
+    
     if (destination) {
       points.push(L.latLng(destination[0], destination[1]));
     }
@@ -208,12 +319,22 @@ export default function RoutePage() {
           <div className="flex flex-wrap gap-4 items-center">
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 bg-green-500 rounded-full"></div>
-              <span className="text-sm  text-black">Your Location</span>
+              <span className="text-sm text-black">Your Location</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-red-500 rounded-full"></div>
-              <span className="text-sm text-black">Destination</span>
+              <div className="w-4 h-4 bg-blue-500 rounded-full"></div>
+              <span className="text-sm text-black">Relief Centres</span>
             </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-orange-500 rounded-full"></div>
+              <span className="text-sm text-black">Nearest Centre</span>
+            </div>
+            {destination && !nearestReliefCentre && (
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 bg-red-500 rounded-full"></div>
+                <span className="text-sm text-black">Destination</span>
+              </div>
+            )}
             
             {locationError && (
               <div className="text-sm text-yellow-600 bg-yellow-50 px-3 py-1 rounded">
@@ -254,8 +375,39 @@ export default function RoutePage() {
           </div>
           
           <p className="text-sm text-gray-600 mt-2">
-            Click on the map to set your destination
+            {nearestReliefCentre 
+              ? `Nearest relief centre: ${nearestReliefCentre.relief_centre.name}`
+              : "Click on the map to set your destination"}
           </p>
+          
+          {/* Relief Centre Info Panel */}
+          {nearestReliefCentre && (
+            <div className="mt-4 p-4 bg-green-50 border border-green-200 text-black rounded-lg">
+              <h3 className="font-bold text-lg text-black mb-2">
+                Nearest Relief Centre
+              </h3>
+              <div className="space-y-1 text-sm">
+                <div>
+                  <span className="font-semibold">Name: </span>
+                  {nearestReliefCentre.relief_centre.name}
+                </div>
+                <div>
+                  <span className="font-semibold">Distance: </span>
+                  {nearestReliefCentre.distance_formatted}
+                </div>
+                <div>
+                  <span className="font-semibold">Travel Time: </span>
+                  {nearestReliefCentre.duration_formatted}
+                </div>
+                {nearestReliefCentre.relief_centre.capacity && (
+                  <div>
+                    <span className="font-semibold">Capacity: </span>
+                    {nearestReliefCentre.relief_centre.capacity} people
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -281,18 +433,38 @@ export default function RoutePage() {
               <Popup>Your Location</Popup>
             </Marker>
             
-            {/* Destination marker */}
-            {destination && (
+            {/* Relief centre markers */}
+            {reliefCentres.map((centre) => {
+              const isNearest = nearestReliefCentre?.relief_centre.id === centre.id;
+              return (
+                <Marker
+                  key={centre.id}
+                  position={[centre.latitude, centre.longitude]}
+                  icon={isNearest ? nearestReliefCentreIcon : reliefCentreIcon}
+                >
+                  <Popup>
+                    <div>
+                      <strong>{centre.name}</strong>
+                      {centre.capacity && <div>Capacity: {centre.capacity}</div>}
+                      {isNearest && <div className="text-orange-600 font-semibold">Nearest Centre</div>}
+                    </div>
+                  </Popup>
+                </Marker>
+              );
+            })}
+            
+            {/* Destination marker (if manually set) */}
+            {destination && !nearestReliefCentre && (
               <Marker position={destination} icon={endIcon}>
                 <Popup>Destination</Popup>
               </Marker>
             )}
             
-            {/* Route polyline */}
+            {/* Route polyline (to nearest relief centre or manual destination) */}
             {routeCoordinates.length > 0 && (
               <Polyline
                 positions={routeCoordinates}
-                color="#3b82f6"
+                color={nearestReliefCentre ? "#f59e0b" : "#3b82f6"}
                 weight={5}
                 opacity={0.7}
               />

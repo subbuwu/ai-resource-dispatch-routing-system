@@ -1,7 +1,13 @@
 import requests
+import os
 from typing import Dict, Any
+from dotenv import load_dotenv
 
-OSRM_BASE_URL = "http://localhost:4000"
+load_dotenv()
+
+# OSRM base URL from environment variables
+# Default: http://localhost:4000
+OSRM_BASE_URL = os.getenv("OSRM_BASE_URL", "http://localhost:4000")
 
 def format_distance(distance_meters: float) -> str:
     """Format distance in a human-readable format"""
@@ -10,7 +16,6 @@ def format_distance(distance_meters: float) -> str:
     else:
         km = distance_meters / 1000
         return f"{km:.1f} km" if km < 10 else f"{int(km)} km"
-
 
 def format_duration(duration_seconds: float) -> str:
     """Format duration in a human-readable format"""

@@ -1,10 +1,24 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import route
+from contextlib import asynccontextmanager
+from app.routers import route, relief_centre
+from app.database import init_db
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for startup events
+    """
+    # Initialize database on startup
+    init_db()
+    yield
+
 
 app = FastAPI(
     title="Disaster Relief Routing Backend",
-    version="0.1"
+    version="0.1",
+    lifespan=lifespan
 )
 
 # Add CORS middleware to allow frontend requests
@@ -17,6 +31,7 @@ app.add_middleware(
 )
 
 app.include_router(route.router)
+app.include_router(relief_centre.router)
 
 @app.get("/health")
 def health_check():
