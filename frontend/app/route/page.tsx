@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -50,6 +50,25 @@ const nearestReliefCentreIcon = new L.Icon({
   iconAnchor: [15, 50],
   popupAnchor: [1, -34],
   shadowSize: [50, 50],
+});
+
+// Emergency service icons
+const fireStationIcon = new L.Icon({
+  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-violet.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41],
+});
+
+const ambulanceIcon = new L.Icon({
+  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-yellow.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41],
 });
 
 // Component to handle map click
@@ -109,6 +128,60 @@ interface ReliefCentre {
   capacity: number | null;
   status: string;
 }
+
+type ReliefSupplyType = "food" | "clothes" | "medicine";
+
+const RELIEF_SUPPLIES_BY_NAME: Record<string, ReliefSupplyType[]> = {
+  "Guduvancherry Central Relief Centre": ["food", "clothes", "medicine"],
+  "Maraimalai Nagar Emergency Shelter": ["food", "medicine"],
+  "Potheri Relief Camp": ["clothes", "medicine"],
+  "Singaperumal Koil Relief Centre": ["food"],
+  "Padappai Emergency Camp": ["clothes"],
+  "Chengalpattu District Relief Centre": ["food", "clothes", "medicine"],
+  "Tambaram Relief Centre": ["food", "medicine"],
+};
+
+type EmergencyServiceType = "Fire Station" | "Ambulance";
+
+interface EmergencyServiceLocation {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  type: EmergencyServiceType;
+}
+
+// Static emergency service locations around Guduvancherry / Chengalpattu area
+const EMERGENCY_SERVICES: EmergencyServiceLocation[] = [
+  {
+    id: "guduvancherry-fire",
+    name: "Guduvancherry Fire Station",
+    latitude: 12.695,
+    longitude: 79.9735,
+    type: "Fire Station",
+  },
+  {
+    id: "chengalpattu-fire",
+    name: "Chengalpattu Fire Station",
+    latitude: 12.69,
+    longitude: 79.965,
+    type: "Fire Station",
+  },
+  {
+    id: "guduvancherry-ambulance",
+    name: "Guduvancherry Government Hospital Ambulance",
+    latitude: 12.6975,
+    longitude: 79.979,
+    type: "Ambulance",
+  },
+  {
+    id: "tambaram-ambulance",
+    name: "Tambaram Emergency Ambulance Point",
+    latitude: 12.93,
+    longitude: 80.095,
+    type: "Ambulance",
+  },
+];
 
 interface NearestReliefCentreResponse {
   relief_centre: ReliefCentre;
@@ -293,6 +366,11 @@ export default function RoutePage() {
     reliefCentres.forEach(centre => {
       points.push(L.latLng(centre.latitude, centre.longitude));
     });
+
+    // Include emergency service locations
+    EMERGENCY_SERVICES.forEach((svc) => {
+      points.push(L.latLng(svc.latitude, svc.longitude));
+    });
     
     if (destination) {
       points.push(L.latLng(destination[0], destination[1]));
@@ -308,6 +386,15 @@ export default function RoutePage() {
 
   // Convert coordinates from [lng, lat] to [lat, lng] for Leaflet
   const routeCoordinates = routeData?.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]) || [];
+
+  const reliefCentreWithSupplies = useMemo(
+    () =>
+      reliefCentres.map((centre) => ({
+        ...centre,
+        supplies: RELIEF_SUPPLIES_BY_NAME[centre.name] ?? [],
+      })),
+    [reliefCentres]
+  );
 
   return (
     <div className="h-screen w-screen flex flex-col">
@@ -328,6 +415,14 @@ export default function RoutePage() {
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 bg-orange-500 rounded-full"></div>
               <span className="text-sm text-black">Nearest Centre</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-violet-600 rounded-full"></div>
+              <span className="text-sm text-black">Emergency service - Fire Station</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 bg-yellow-400 rounded-full border border-yellow-600"></div>
+              <span className="text-sm text-black">Emergency service - Ambulance</span>
             </div>
             {destination && !nearestReliefCentre && (
               <div className="flex items-center gap-2">
@@ -405,6 +500,20 @@ export default function RoutePage() {
                     {nearestReliefCentre.relief_centre.capacity} people
                   </div>
                 )}
+                {RELIEF_SUPPLIES_BY_NAME[nearestReliefCentre.relief_centre.name]?.length ? (
+                  <div>
+                    <span className="font-semibold">Supplies: </span>
+                    {RELIEF_SUPPLIES_BY_NAME[nearestReliefCentre.relief_centre.name]
+                      .map((s) =>
+                        s === "food"
+                          ? "Food"
+                          : s === "clothes"
+                          ? "Clothes"
+                          : "Medicine"
+                      )
+                      .join(", ")}
+                  </div>
+                ) : null}
               </div>
             </div>
           )}
@@ -434,8 +543,9 @@ export default function RoutePage() {
             </Marker>
             
             {/* Relief centre markers */}
-            {reliefCentres.map((centre) => {
+            {reliefCentreWithSupplies.map((centre) => {
               const isNearest = nearestReliefCentre?.relief_centre.id === centre.id;
+              const supplies = centre.supplies;
               return (
                 <Marker
                   key={centre.id}
@@ -443,15 +553,56 @@ export default function RoutePage() {
                   icon={isNearest ? nearestReliefCentreIcon : reliefCentreIcon}
                 >
                   <Popup>
-                    <div>
-                      <strong>{centre.name}</strong>
-                      {centre.capacity && <div>Capacity: {centre.capacity}</div>}
-                      {isNearest && <div className="text-orange-600 font-semibold">Nearest Centre</div>}
+                    <div className="text-sm text-black">
+                      <strong className="block mb-1">{centre.name}</strong>
+                      {centre.capacity && (
+                        <div className="mb-1">Capacity: {centre.capacity}</div>
+                      )}
+                      {supplies.length ? (
+                        <div className="mb-1">
+                          <span className="font-semibold">Supplies: </span>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {supplies.map((s) => (
+                              <span
+                                key={s}
+                                className="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700 border border-blue-200"
+                              >
+                                {s === "food"
+                                  ? "Food"
+                                  : s === "clothes"
+                                  ? "Clothes"
+                                  : "Medicine"}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      {isNearest && (
+                        <div className="text-orange-600 font-semibold">
+                          Nearest Centre
+                        </div>
+                      )}
                     </div>
                   </Popup>
                 </Marker>
               );
             })}
+
+            {/* Emergency service markers */}
+            {EMERGENCY_SERVICES.map((svc) => (
+              <Marker
+                key={svc.id}
+                position={[svc.latitude, svc.longitude]}
+                icon={svc.type === "Fire Station" ? fireStationIcon : ambulanceIcon}
+              >
+                <Popup>
+                  <div className="text-sm text-black">
+                    <strong className="block mb-1">{svc.name}</strong>
+                    <div>{`Emergency service - ${svc.type}`}</div>
+                  </div>
+                </Popup>
+              </Marker>
+            ))}
             
             {/* Destination marker (if manually set) */}
             {destination && !nearestReliefCentre && (

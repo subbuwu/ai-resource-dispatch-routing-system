@@ -13,7 +13,7 @@ export default function Page() {
         <div className="absolute inset-0 bg-white/40 backdrop-blur-md"></div>
         <div className="relative z-10 min-h-screen flex items-center justify-center bg-amber-50">
             <div className="flex flex-col gap-4">
-                <button onClick={() => router.push("/dashboard")}
+                <button onClick={() => router.push("/help")}
                 className="px-8 py-4 text-lg font-bold text-white bg-red-600 rounded-lg
                 shadow-lg hover:bg-red-700 transition">
                 Need Help!
