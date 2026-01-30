@@ -1,14 +1,18 @@
 """
 API endpoints for relief centres
 """
+import json
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 from typing import List
-from app.database import get_db, ReliefCentre
+from app.database import get_db, ReliefCentre, ReliefRequest, ReliefRequestStatus
 from app.schemas.relief_centre import (
     ReliefCentreResponse,
     NearestReliefCentreRequest,
-    NearestReliefCentreResponse
+    NearestReliefCentreResponse,
+    ReliefRequestCreate,
+    ReliefRequestResponse,
 )
 from app.services.relief_centre_service import (
     get_all_active_relief_centres,
@@ -89,4 +93,72 @@ def find_nearest_relief_centre_endpoint(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Routing service error: {str(e)}"
         )
+
+
+@router.post("/requests", response_model=ReliefRequestResponse)
+def create_relief_request(
+    body: ReliefRequestCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Create a relief request (called when user confirms supply request on Need Help page).
+    Volunteers at the relief centre can see this request.
+    """
+    centre = db.query(ReliefCentre).filter(ReliefCentre.id == body.relief_centre_id).first()
+    if not centre:
+        raise HTTPException(status_code=404, detail="Relief centre not found")
+    req = ReliefRequest(
+        relief_centre_id=body.relief_centre_id,
+        latitude=body.latitude,
+        longitude=body.longitude,
+        supplies=json.dumps(body.supplies),
+        status=ReliefRequestStatus.PENDING,
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    supplies_list = json.loads(req.supplies) if isinstance(req.supplies, str) else req.supplies
+    return ReliefRequestResponse(
+        id=req.id,
+        relief_centre_id=req.relief_centre_id,
+        latitude=req.latitude,
+        longitude=req.longitude,
+        supplies=supplies_list,
+        status=req.status.value,
+        created_at=req.created_at.isoformat() if req.created_at else "",
+    )
+
+
+@router.get("/{centre_id}/requests", response_model=List[ReliefRequestResponse])
+def get_requests_for_centre(
+    centre_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    List all requests for a relief centre (for volunteers working at that centre).
+    """
+    centre = db.query(ReliefCentre).filter(ReliefCentre.id == centre_id).first()
+    if not centre:
+        raise HTTPException(status_code=404, detail="Relief centre not found")
+    requests = (
+        db.query(ReliefRequest)
+        .filter(ReliefRequest.relief_centre_id == centre_id)
+        .order_by(desc(ReliefRequest.created_at))
+        .all()
+    )
+    result = []
+    for req in requests:
+        supplies_list = json.loads(req.supplies) if isinstance(req.supplies, str) else req.supplies
+        result.append(
+            ReliefRequestResponse(
+                id=req.id,
+                relief_centre_id=req.relief_centre_id,
+                latitude=req.latitude,
+                longitude=req.longitude,
+                supplies=supplies_list,
+                status=req.status.value,
+                created_at=req.created_at.isoformat() if req.created_at else "",
+            )
+        )
+    return result
 

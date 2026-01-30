@@ -1,9 +1,10 @@
 """
 Database setup for relief centres using SQLite (lightweight, no external setup required)
 """
-from sqlalchemy import create_engine, Column, Integer, String, Float, Enum as SQLEnum
+from sqlalchemy import create_engine, Column, Integer, String, Float, Enum as SQLEnum, ForeignKey, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from datetime import datetime
 import enum
 import os
 
@@ -51,6 +52,34 @@ class ReliefCentre(Base):
     
     def __repr__(self):
         return f"<ReliefCentre(name={self.name}, lat={self.latitude}, lng={self.longitude}, status={self.status})>"
+
+
+class ReliefRequestStatus(str, enum.Enum):
+    """Relief request status"""
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    FULFILLED = "fulfilled"
+
+
+class ReliefRequest(Base):
+    """
+    User request for supplies, linked to a relief centre (nearest at time of request).
+    Volunteers at that centre can see and manage these requests.
+    """
+    __tablename__ = "relief_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    relief_centre_id = Column(Integer, ForeignKey("relief_centres.id"), nullable=False, index=True)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    supplies = Column(Text, nullable=False)  # JSON array of supply ids, e.g. ["food","medical"]
+    status = Column(
+        SQLEnum(ReliefRequestStatus, native_enum=False),
+        nullable=False,
+        default=ReliefRequestStatus.PENDING,
+        index=True
+    )
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 def get_db():

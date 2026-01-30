@@ -43,3 +43,23 @@ class NearestReliefCentreResponse(BaseModel):
     distance_formatted: str
     duration_formatted: str
 
+
+# Relief request schemas (for volunteers to see requests at their centre)
+class ReliefRequestCreate(BaseModel):
+    """Schema for creating a relief request (when user confirms on Need Help page)"""
+    relief_centre_id: int
+    latitude: float
+    longitude: float
+    supplies: List[str]
+
+
+class ReliefRequestResponse(BaseModel):
+    """Schema for a single relief request"""
+    id: int
+    relief_centre_id: int
+    latitude: float
+    longitude: float
+    supplies: List[str]
+    status: str
+    created_at: str
+

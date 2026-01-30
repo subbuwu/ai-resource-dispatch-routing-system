@@ -19,3 +19,6 @@ uvicorn==0.40.0
 # Relief Centres: SQLite database (lightweight, no setup required)
 sqlalchemy>=2.0.25
 python-dotenv==1.0.0
+
+# Weather API integration
+# OpenWeatherMap API is used via requests library (already included above)

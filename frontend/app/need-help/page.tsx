@@ -132,7 +132,7 @@ interface RouteWeatherData {
   summary?: RouteWeatherSummary;
 }
 
-export default function DashboardPage() {
+export default function NeedHelpPage() {
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [routeData, setRouteData] = useState<RouteResponse | null>(null);
   const [nearestReliefCentre, setNearestReliefCentre] = useState<NearestReliefCentreResponse | null>(null);
