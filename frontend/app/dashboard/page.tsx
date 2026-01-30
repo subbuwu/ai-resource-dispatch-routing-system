@@ -1,46 +1,31 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Circle,
-  MapContainer,
-  Marker,
-  Polyline,
-  Popup,
-  TileLayer,
-  useMap,
-} from "react-leaflet";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-// Fix for Leaflet default marker icons in Next.js
-delete (L.Icon.Default.prototype as unknown as { _getIconUrl: unknown })._getIconUrl;
+// Fix for default marker icons in Next.js
+delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
-  iconUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png",
-  shadowUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+  iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
+  iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
 });
 
+// Custom icons
 const userIcon = new L.Icon({
-  iconUrl:
-    "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png",
-  shadowUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
+  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+  iconSize: [30, 50],
+  iconAnchor: [15, 50],
   popupAnchor: [1, -34],
-  shadowSize: [41, 41],
+  shadowSize: [50, 50],
 });
 
 const reliefCentreIcon = new L.Icon({
-  iconUrl:
-    "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png",
-  shadowUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
   iconSize: [25, 41],
   iconAnchor: [12, 41],
   popupAnchor: [1, -34],
@@ -48,35 +33,40 @@ const reliefCentreIcon = new L.Icon({
 });
 
 const nearestReliefCentreIcon = new L.Icon({
-  iconUrl:
-    "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png",
-  shadowUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-  iconSize: [30, 50],
-  iconAnchor: [15, 50],
+  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+  iconSize: [35, 60],
+  iconAnchor: [17, 60],
   popupAnchor: [1, -34],
-  shadowSize: [50, 50],
+  shadowSize: [60, 60],
 });
 
-type LatLngTuple = [number, number];
-
-type NeedOptionId = "food" | "clothes" | "medicine" | "emergency_services";
-
-const NEED_OPTIONS: ReadonlyArray<{ id: NeedOptionId; label: string }> = [
-  { id: "food", label: "Food" },
-  { id: "clothes", label: "Clothes" },
-  { id: "medicine", label: "Medicine" },
-  { id: "emergency_services", label: "Emergency services" },
-] as const;
-
-interface ReliefCentre {
-  id: number;
-  name: string;
-  latitude: number;
-  longitude: number;
-  capacity: number | null;
-  status: string;
+// Component to handle map bounds
+function MapBounds({ bounds }: { bounds: L.LatLngBounds | null }) {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (bounds) {
+      map.fitBounds(bounds, { padding: [100, 100] });
+    }
+  }, [map, bounds]);
+  
+  return null;
 }
+
+const BACKEND_URL = "http://localhost:8000";
+
+// Available supplies
+const SUPPLIES = [
+  { id: "food", name: "Food & Water", icon: "🍽️" },
+  { id: "medical", name: "Medical Supplies", icon: "🏥" },
+  { id: "shelter", name: "Shelter", icon: "🏠" },
+  { id: "clothing", name: "Clothing", icon: "👕" },
+  { id: "blankets", name: "Blankets", icon: "🛏️" },
+  { id: "hygiene", name: "Hygiene Items", icon: "🧴" },
+  { id: "batteries", name: "Batteries & Flashlights", icon: "🔦" },
+  { id: "communication", name: "Communication Devices", icon: "📱" },
+];
 
 interface RouteResponse {
   summary: {
@@ -93,8 +83,16 @@ interface RouteResponse {
     type: string;
     coordinates: number[][];
   };
-  // OSRM-service returns "coordinates" as [lng, lat] tuples
-  coordinates: [number, number][];
+  coordinates: number[][];
+}
+
+interface ReliefCentre {
+  id: number;
+  name: string;
+  latitude: number;
+  longitude: number;
+  capacity: number | null;
+  status: string;
 }
 
 interface NearestReliefCentreResponse {
@@ -106,495 +104,823 @@ interface NearestReliefCentreResponse {
   duration_formatted: string;
 }
 
-const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL?.trim() || "http://localhost:8000";
-
-function FitBounds({ bounds }: { bounds: L.LatLngBounds | null }) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (!bounds) return;
-    map.fitBounds(bounds, { padding: [50, 50] });
-  }, [map, bounds]);
-
-  return null;
+interface WeatherData {
+  temperature: number | null;
+  condition: string;
+  description: string;
+  humidity: number | null;
+  wind_speed: number | null;
+  rainfall: number | null;
+  alerts: Array<{ event: string; description: string; severity: string }>;
+  icon: string;
+  api_available: boolean;
+  city?: string;
+  country?: string;
+  safety_status?: string; // safe, caution, unsafe
+  safety_message?: string;
+  calamities?: Array<{ type: string; severity: string; description: string }>;
 }
-
-function formatCoords(value: number) {
-  return value.toFixed(5);
-}
-
-function formatTimestamp(ms: number) {
-  try {
-    return new Date(ms).toLocaleString();
-  } catch {
-    return String(ms);
-  }
-}
-
-const DEMO_LOCATION: LatLngTuple = [12.6939, 79.9757]; // Guduvancherry, Tamil Nadu
 
 export default function DashboardPage() {
-  const [userLocation, setUserLocation] = useState<LatLngTuple | null>(null);
-  const [accuracyMeters, setAccuracyMeters] = useState<number | null>(null);
-  const [locationTimestamp, setLocationTimestamp] = useState<number | null>(null);
-  const [locationStatus, setLocationStatus] = useState<
-    "idle" | "requesting" | "ready" | "error"
-  >("idle");
-  const [locationError, setLocationError] = useState<string | null>(null);
-
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+  const [routeData, setRouteData] = useState<RouteResponse | null>(null);
+  const [nearestReliefCentre, setNearestReliefCentre] = useState<NearestReliefCentreResponse | null>(null);
   const [reliefCentres, setReliefCentres] = useState<ReliefCentre[]>([]);
-  const [reliefCentresError, setReliefCentresError] = useState<string | null>(
-    null
-  );
-  const [loadingReliefCentres, setLoadingReliefCentres] = useState(false);
+  const [weather, setWeather] = useState<WeatherData | null>(null);
+  const [routeWeather, setRouteWeather] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Supply request state
+  const [showSupplyModal, setShowSupplyModal] = useState(false);
+  const [selectedSupplies, setSelectedSupplies] = useState<string[]>([]);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [requestConfirmed, setRequestConfirmed] = useState(false);
+  
+  // Directions state
+  const [showDirections, setShowDirections] = useState(false);
+  const [directions, setDirections] = useState<Array<{ step: number; instruction: string; distance: string; icon: string }>>([]);
+  const [showWeatherBanner, setShowWeatherBanner] = useState(true);
+  
+  const weatherUpdateInterval = useRef<NodeJS.Timeout | null>(null);
 
-  const [nearest, setNearest] = useState<NearestReliefCentreResponse | null>(
-    null
-  );
-  const [nearestError, setNearestError] = useState<string | null>(null);
-  const [loadingNearest, setLoadingNearest] = useState(false);
-
-  // "Need help" popup state (auto-opens 2s after map is visible)
-  const userMarkerRef = useRef<L.Marker | null>(null);
-  const [selectedNeeds, setSelectedNeeds] = useState<NeedOptionId[]>([]);
-  const [needsPopupDismissed, setNeedsPopupDismissed] = useState(false);
-  const [needsPopupOpen, setNeedsPopupOpen] = useState(false);
-
-  const requestLocation = useCallback(() => {
-    if (!("geolocation" in navigator)) {
-      setLocationStatus("error");
-      setLocationError("Geolocation is not supported by your browser.");
-      return;
+  // Get user's current location
+  useEffect(() => {
+    if (navigator.geolocation) {
+      setLoading(true);
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          setUserLocation([latitude, longitude]);
+          setLoading(false);
+        },
+        (err) => {
+          console.error("Location error:", err);
+          setUserLocation([12.6939, 79.9757]); // Default to Guduvancherry
+          setLoading(false);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        }
+      );
+    } else {
+      setUserLocation([12.6939, 79.9757]);
     }
-
-    setLocationStatus("requesting");
-    setLocationError(null);
-
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setUserLocation([pos.coords.latitude, pos.coords.longitude]);
-        setAccuracyMeters(
-          typeof pos.coords.accuracy === "number" ? pos.coords.accuracy : null
-        );
-        setLocationTimestamp(pos.timestamp || Date.now());
-        setLocationStatus("ready");
-      },
-      (err) => {
-        const base =
-          err.code === err.PERMISSION_DENIED
-            ? "Location permission denied. Enable location access for this site."
-            : err.code === err.POSITION_UNAVAILABLE
-              ? "Your location is currently unavailable."
-              : err.code === err.TIMEOUT
-                ? "Timed out while fetching your location. Try again."
-                : "Failed to fetch your location.";
-
-        setLocationStatus("error");
-        setLocationError(`${base}${err.message ? ` (${err.message})` : ""}`);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 12_000,
-        maximumAge: 10_000,
-      }
-    );
   }, []);
 
-  // Initial load: request location + fetch relief centres
-  useEffect(() => {
-    requestLocation();
-  }, [requestLocation]);
-
+  // Fetch relief centres
   useEffect(() => {
     const fetchReliefCentres = async () => {
-      setLoadingReliefCentres(true);
-      setReliefCentresError(null);
       try {
-        const res = await fetch(`${BACKEND_URL}/relief-centres/`);
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
+        const response = await fetch(`${BACKEND_URL}/relief-centres/`);
+        if (response.ok) {
+          const centres = await response.json();
+          setReliefCentres(centres);
         }
-        const data: ReliefCentre[] = await res.json();
-        setReliefCentres(Array.isArray(data) ? data : []);
-      } catch (e) {
-        setReliefCentresError(
-          e instanceof Error
-            ? `Failed to load relief centres (${e.message}).`
-            : "Failed to load relief centres."
-        );
-      } finally {
-        setLoadingReliefCentres(false);
+      } catch (err) {
+        console.error("Failed to fetch relief centres:", err);
       }
     };
-
     fetchReliefCentres();
   }, []);
 
-  // Once we have location, fetch nearest relief centre (OSRM-backed)
-  useEffect(() => {
+  // Fetch weather data
+  const fetchWeather = useCallback(async () => {
     if (!userLocation) return;
-
-    const fetchNearest = async () => {
-      setLoadingNearest(true);
-      setNearestError(null);
-      try {
-        const res = await fetch(`${BACKEND_URL}/relief-centres/nearest`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            latitude: userLocation[0],
-            longitude: userLocation[1],
-          }),
-        });
-
-        if (!res.ok) {
-          const errorData = (await res.json().catch(() => ({}))) as {
-            detail?: string;
-          };
-          throw new Error(errorData.detail || `HTTP ${res.status}`);
-        }
-
-        const data: NearestReliefCentreResponse = await res.json();
-        setNearest(data);
-      } catch (e) {
-        setNearest(null);
-        setNearestError(
-          e instanceof Error
-            ? `Failed to find nearest relief centre (${e.message}).`
-            : "Failed to find nearest relief centre."
-        );
-      } finally {
-        setLoadingNearest(false);
+    
+    try {
+      const response = await fetch(
+        `${BACKEND_URL}/weather/?latitude=${userLocation[0]}&longitude=${userLocation[1]}`
+      );
+      if (response.ok) {
+        const data: WeatherData = await response.json();
+        setWeather(data);
       }
-    };
-
-    fetchNearest();
+    } catch (err) {
+      console.error("Failed to fetch weather:", err);
+    }
   }, [userLocation]);
 
-  const routePolyline = useMemo<LatLngTuple[]>(() => {
-    const coords = nearest?.route?.coordinates;
-    if (!coords?.length) return [];
-    return coords.map(([lng, lat]) => [lat, lng]);
-  }, [nearest]);
-
-  const bounds = useMemo(() => {
-    const points: L.LatLng[] = [];
-
-    if (userLocation) points.push(L.latLng(userLocation[0], userLocation[1]));
-
-    for (const c of reliefCentres) {
-      points.push(L.latLng(c.latitude, c.longitude));
+  // Fetch route weather
+  const fetchRouteWeather = useCallback(async () => {
+    if (!routeData?.coordinates || routeData.coordinates.length === 0) return;
+    
+    try {
+      const response = await fetch(`${BACKEND_URL}/weather/route`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ coordinates: routeData.coordinates }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setRouteWeather(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch route weather:", err);
     }
+  }, [routeData]);
 
-    if (routePolyline.length) {
-      for (const [lat, lng] of routePolyline) points.push(L.latLng(lat, lng));
+  // Initial weather fetch
+  useEffect(() => {
+    fetchWeather();
+  }, [fetchWeather]);
+
+  // Set up weather refresh interval (every 5 minutes)
+  useEffect(() => {
+    weatherUpdateInterval.current = setInterval(() => {
+      fetchWeather();
+      if (routeData) {
+        fetchRouteWeather();
+      }
+    }, 5 * 60 * 1000); // 5 minutes
+
+    return () => {
+      if (weatherUpdateInterval.current) {
+        clearInterval(weatherUpdateInterval.current);
+      }
+    };
+  }, [fetchWeather, fetchRouteWeather, routeData]);
+
+  // Fetch route weather when route is available
+  useEffect(() => {
+    if (routeData) {
+      fetchRouteWeather();
     }
+  }, [routeData, fetchRouteWeather]);
 
-    if (!points.length) return null;
-    return L.latLngBounds(points);
-  }, [userLocation, reliefCentres, routePolyline]);
+  // Handle supply request
+  const handleSupplyRequest = () => {
+    setShowSupplyModal(true);
+  };
 
-  const showMap = userLocation !== null;
-
-  // Auto-open the needs popup 2s after map appears (only once per session unless dismissed reset)
-  useEffect(() => {
-    if (!showMap) return;
-    if (needsPopupDismissed) return;
-
-    const t = window.setTimeout(() => {
-      setNeedsPopupOpen(true);
-    }, 2000);
-
-    return () => window.clearTimeout(t);
-  }, [showMap, needsPopupDismissed]);
-
-  // When asked to open, programmatically open the Leaflet popup.
-  useEffect(() => {
-    if (!needsPopupOpen) return;
-    userMarkerRef.current?.openPopup();
-  }, [needsPopupOpen]);
-
-  const toggleNeed = useCallback((id: NeedOptionId) => {
-    setSelectedNeeds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+  const toggleSupply = (supplyId: string) => {
+    setSelectedSupplies((prev) =>
+      prev.includes(supplyId)
+        ? prev.filter((id) => id !== supplyId)
+        : [...prev, supplyId]
     );
-  }, []);
+  };
+
+  const handleConfirmRequest = async () => {
+    if (selectedSupplies.length === 0) {
+      setError("Please select at least one supply you need");
+      return;
+    }
+    setShowConfirmation(true);
+  };
+
+  const handleFinalConfirm = async () => {
+    if (!userLocation) {
+      setError("Location not available");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      // Find nearest relief centre
+      const response = await fetch(`${BACKEND_URL}/relief-centres/nearest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          latitude: userLocation[0],
+          longitude: userLocation[1],
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to find nearest relief centre");
+      }
+
+      const data: NearestReliefCentreResponse = await response.json();
+      setNearestReliefCentre(data);
+      setRouteData(data.route);
+      
+      // Generate simple directions
+      generateDirections(data.route, data.relief_centre.name);
+      
+      setRequestConfirmed(true);
+      setShowSupplyModal(false);
+      setShowConfirmation(false);
+      setShowDirections(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to process request");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Generate Google Maps-style step-by-step directions
+  const generateDirections = (route: RouteResponse, centreName: string) => {
+    const steps: Array<{ step: number; instruction: string; distance: string; icon: string }> = [];
+    const coords = route.coordinates;
+    const totalDistance = route.summary.distance;
+    const totalDuration = route.summary.duration;
+    
+    // Start instruction
+    steps.push({
+      step: 1,
+      instruction: "Start from your current location",
+      distance: "0 m",
+      icon: "📍"
+    });
+    
+    // Calculate approximate steps based on route length
+    const numSteps = Math.min(10, Math.max(4, Math.floor(coords.length / 20)));
+    const stepSize = Math.max(1, Math.floor(coords.length / numSteps));
+    
+    // Generate intermediate steps
+    for (let i = 1; i < numSteps - 1; i++) {
+      const idx = i * stepSize;
+      if (idx < coords.length) {
+        const distance = (totalDistance / numSteps) * i;
+        const distanceText = distance < 1000 
+          ? `${Math.round(distance)} m` 
+          : `${(distance / 1000).toFixed(1)} km`;
+        
+        // Determine direction icon based on step
+        const icons = ["→", "↗", "→", "↘", "↓", "↙", "←", "↖", "↑", "↗"];
+        const icon = icons[i % icons.length];
+        
+        steps.push({
+          step: i + 1,
+          instruction: `Continue straight for ${distanceText}`,
+          distance: distanceText,
+          icon: icon
+        });
+      }
+    }
+    
+    // Final destination
+    steps.push({
+      step: steps.length + 1,
+      instruction: `Arrive at ${centreName}`,
+      distance: route.summary.distance_formatted,
+      icon: "🏁"
+    });
+    
+    setDirections(steps);
+  };
+
+  // Calculate map bounds
+  const getBounds = (): L.LatLngBounds | null => {
+    if (!userLocation) return null;
+    
+    const points: L.LatLng[] = [L.latLng(userLocation[0], userLocation[1])];
+    
+    if (routeData) {
+      routeData.coordinates.forEach(([lng, lat]) => {
+        points.push(L.latLng(lat, lng));
+      });
+    }
+    
+    reliefCentres.forEach((centre) => {
+      points.push(L.latLng(centre.latitude, centre.longitude));
+    });
+    
+    return L.latLngBounds(points);
+  };
+
+  const routeCoordinates = routeData?.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]) || [];
+
+  // Get weather icon URL
+  const getWeatherIconUrl = (icon: string) => {
+    return `https://openweathermap.org/img/wn/${icon}@2x.png`;
+  };
 
   return (
-    <div className="h-screen w-screen flex flex-col">
-      {/* Top bar */}
-      <div className="bg-white/95 backdrop-blur border-b border-black/5 shadow-sm z-10">
-        <div className="max-w-7xl mx-auto p-4 flex flex-col gap-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-black">Dashboard</h1>
-              <p className="text-sm text-black/70">
-                Live location + nearest relief centre overview.
-              </p>
+    <div className="h-screen w-screen flex flex-col bg-gray-50">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-blue-600 to-blue-800 text-white shadow-lg z-10">
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold">Disaster Relief Dispatch System</h1>
+              <p className="text-blue-100 text-sm mt-1">Real-time assistance and routing</p>
             </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              <Link
-                href="/route"
-                className="px-3 py-2 rounded-md text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700"
-              >
-                Open Route Planner
-              </Link>
-              <button
-                type="button"
-                onClick={requestLocation}
-                className="px-3 py-2 rounded-md text-sm font-semibold bg-black text-white hover:bg-black/90"
-              >
-                Refresh location
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setUserLocation(DEMO_LOCATION);
-                  setAccuracyMeters(null);
-                  setLocationTimestamp(Date.now());
-                  setLocationStatus("ready");
-                  setLocationError(null);
-                }}
-                className="px-3 py-2 rounded-md text-sm font-semibold bg-amber-500 text-black hover:bg-amber-400"
-                title="Use a demo location (for development/testing)"
-              >
-                Use demo location
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="rounded-lg border border-black/10 bg-white p-3">
-              <div className="text-xs font-semibold text-black/60">
-                Your location
-              </div>
-              <div className="mt-1 text-sm text-black">
-                {locationStatus === "requesting" && "Requesting location…"}
-                {locationStatus === "idle" && "Waiting to request location…"}
-                {locationStatus === "error" && (
-                  <span className="text-red-700">{locationError}</span>
-                )}
-                {locationStatus === "ready" && userLocation && (
-                  <div className="space-y-1">
-                    <div className="font-semibold">
-                      {formatCoords(userLocation[0])},{" "}
-                      {formatCoords(userLocation[1])}
+            
+            {/* Weather Display */}
+            {weather && (
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4 bg-white/10 backdrop-blur-sm rounded-lg px-4 py-2">
+                  {weather.api_available && weather.icon && (
+                    <img 
+                      src={getWeatherIconUrl(weather.icon)} 
+                      alt={weather.condition}
+                      className="w-12 h-12"
+                    />
+                  )}
+                  <div>
+                    <div className="text-sm font-semibold">
+                      {weather.temperature !== null ? `${Math.round(weather.temperature)}°C` : "N/A"}
                     </div>
-                    <div className="text-xs text-black/60">
-                      {accuracyMeters ? `±${Math.round(accuracyMeters)}m` : "—"}
-                      {locationTimestamp
-                        ? ` • ${formatTimestamp(locationTimestamp)}`
-                        : ""}
-                    </div>
+                    <div className="text-xs text-blue-100">{weather.description}</div>
+                    {weather.rainfall && weather.rainfall > 0 && (
+                      <div className="text-xs text-yellow-200">🌧️ {weather.rainfall.toFixed(1)}mm/h</div>
+                    )}
                   </div>
+                </div>
+                {!showWeatherBanner && (
+                  <button
+                    onClick={() => setShowWeatherBanner(true)}
+                    className="bg-white/20 hover:bg-white/30 backdrop-blur-sm rounded-lg px-3 py-2 text-sm font-semibold text-white transition"
+                    title="Show weather banner"
+                  >
+                    📍 Show Safety Status
+                  </button>
                 )}
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-black/10 bg-white p-3">
-              <div className="text-xs font-semibold text-black/60">
-                Relief centres
-              </div>
-              <div className="mt-1 text-sm text-black">
-                {loadingReliefCentres ? (
-                  "Loading…"
-                ) : reliefCentresError ? (
-                  <span className="text-red-700">{reliefCentresError}</span>
-                ) : (
-                  <div className="space-y-1">
-                    <div className="font-semibold">
-                      {reliefCentres.length} active centre
-                      {reliefCentres.length === 1 ? "" : "s"}
-                    </div>
-                    <div className="text-xs text-black/60">
-                      Backend: <span className="font-mono">{BACKEND_URL}</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-black/10 bg-white p-3">
-              <div className="text-xs font-semibold text-black/60">
-                Nearest relief centre
-              </div>
-              <div className="mt-1 text-sm text-black">
-                {loadingNearest ? (
-                  "Finding nearest…"
-                ) : nearestError ? (
-                  <span className="text-red-700">{nearestError}</span>
-                ) : nearest ? (
-                  <div className="space-y-1">
-                    <div className="font-semibold">{nearest.relief_centre.name}</div>
-                    <div className="text-xs text-black/60">
-                      {nearest.distance_formatted} • {nearest.duration_formatted}
-                    </div>
-                  </div>
-                ) : (
-                  "—"
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-4 text-xs text-black/70">
-            <div className="flex items-center gap-2">
-              <span className="inline-block h-3 w-3 rounded-full bg-green-500" />
-              Your location
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="inline-block h-3 w-3 rounded-full bg-blue-500" />
-              Relief centres
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="inline-block h-3 w-3 rounded-full bg-orange-500" />
-              Nearest centre
-            </div>
-            {routePolyline.length > 0 && (
-              <div className="flex items-center gap-2">
-                <span className="inline-block h-1 w-6 rounded bg-orange-500" />
-                Route to nearest
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* Map */}
-      <div className="flex-1 relative">
-        {showMap ? (
-          <MapContainer
-            center={userLocation!}
-            zoom={14}
-            style={{ height: "100%", width: "100%" }}
-            scrollWheelZoom
-          >
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-
-            <FitBounds bounds={bounds} />
-
-            {/* User */}
-            <Marker
-              position={userLocation!}
-              icon={userIcon}
-              ref={(m) => {
-                userMarkerRef.current = m;
-              }}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Main Map Area */}
+        <div className="flex-1 relative">
+          {/* Weather & Safety Banner - positioned near user location */}
+          {userLocation && weather && showWeatherBanner && (
+            <div 
+              className="absolute top-4 left-4 z-[1000] max-w-md"
+              style={{ zIndex: 1000 }}
             >
-              <Popup>
-                <div className="text-sm text-black min-w-[220px]">
-                  <div className="font-semibold">Your location</div>
-                  <div className="text-black/80">
-                    {formatCoords(userLocation![0])}, {formatCoords(userLocation![1])}
+              <div className={`rounded-lg shadow-2xl border-2 p-4 backdrop-blur-sm ${
+                weather.safety_status === "unsafe" 
+                  ? "bg-red-500/95 border-red-600 text-white" 
+                  : weather.safety_status === "caution"
+                  ? "bg-yellow-500/95 border-yellow-600 text-white"
+                  : "bg-green-500/95 border-green-600 text-white"
+              }`}>
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    {weather.api_available && weather.icon && (
+                      <img 
+                        src={getWeatherIconUrl(weather.icon)} 
+                        alt={weather.condition}
+                        className="w-10 h-10"
+                      />
+                    )}
+                    <div>
+                      <div className="font-bold text-lg">
+                        {weather.temperature !== null ? `${Math.round(weather.temperature)}°C` : "N/A"}
+                      </div>
+                      <div className="text-sm opacity-90">{weather.description}</div>
+                    </div>
                   </div>
-                  {accuracyMeters ? (
-                    <div className="text-black/60">±{Math.round(accuracyMeters)}m</div>
-                  ) : null}
-
-                  <div className="h-px bg-black/10 my-3" />
-
-                  <div className="font-semibold mb-2">What do you need?</div>
-                  <div className="space-y-2">
-                    {NEED_OPTIONS.map((opt) => (
-                      <label key={opt.id} className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={selectedNeeds.includes(opt.id)}
-                          onChange={() => toggleNeed(opt.id)}
-                        />
-                        <span>{opt.label}</span>
-                      </label>
+                  <button
+                    onClick={() => setShowWeatherBanner(false)}
+                    className="text-white/80 hover:text-white text-xl font-bold leading-none"
+                  >
+                    ×
+                  </button>
+                </div>
+                
+                {/* Safety Status */}
+                {weather.safety_message && (
+                  <div className={`mt-3 p-2 rounded ${
+                    weather.safety_status === "unsafe" 
+                      ? "bg-red-600/50" 
+                      : weather.safety_status === "caution"
+                      ? "bg-yellow-600/50"
+                      : "bg-green-600/50"
+                  }`}>
+                    <div className="font-semibold text-sm">{weather.safety_message}</div>
+                  </div>
+                )}
+                
+                {/* Calamities List */}
+                {weather.calamities && weather.calamities.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    <div className="text-xs font-semibold opacity-90">Active Conditions:</div>
+                    {weather.calamities.map((calamity, idx) => (
+                      <div key={idx} className="text-xs opacity-90 flex items-center gap-1">
+                        <span>⚠️</span>
+                        <span>{calamity.type}: {calamity.description}</span>
+                      </div>
                     ))}
                   </div>
+                )}
+                
+                {/* Additional Weather Info */}
+                <div className="mt-2 flex gap-4 text-xs opacity-80">
+                  {weather.rainfall !== null && weather.rainfall > 0 && (
+                    <div>🌧️ {weather.rainfall.toFixed(1)}mm/h</div>
+                  )}
+                  {weather.wind_speed !== null && (
+                    <div>💨 {weather.wind_speed.toFixed(1)} m/s</div>
+                  )}
+                  {weather.humidity !== null && (
+                    <div>💧 {weather.humidity}%</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {userLocation ? (
+            <MapContainer
+              center={userLocation}
+              zoom={13}
+              style={{ height: "100%", width: "100%" }}
+              scrollWheelZoom={true}
+            >
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              
+              <MapBounds bounds={getBounds()} />
+              
+              {/* User location marker */}
+              <Marker position={userLocation} icon={userIcon}>
+                <Popup>
+                  <div className="text-center">
+                    <strong>Your Location</strong>
+                    {weather && (
+                      <div className="text-xs mt-1">
+                        {weather.temperature !== null && `${Math.round(weather.temperature)}°C`}
+                      </div>
+                    )}
+                  </div>
+                </Popup>
+              </Marker>
+              
+              {/* Relief centre markers */}
+              {reliefCentres.map((centre) => {
+                const isNearest = nearestReliefCentre?.relief_centre.id === centre.id;
+                return (
+                  <Marker
+                    key={centre.id}
+                    position={[centre.latitude, centre.longitude]}
+                    icon={isNearest ? nearestReliefCentreIcon : reliefCentreIcon}
+                  >
+                    <Popup>
+                      <div>
+                        <strong>{centre.name}</strong>
+                        {centre.capacity && <div>Capacity: {centre.capacity} people</div>}
+                        {isNearest && (
+                          <div className="text-orange-600 font-semibold mt-1">
+                            ⭐ Nearest Centre
+                          </div>
+                        )}
+                      </div>
+                    </Popup>
+                  </Marker>
+                );
+              })}
+              
+              {/* Route polyline */}
+              {routeCoordinates.length > 0 && (
+                <Polyline
+                  positions={routeCoordinates}
+                  color="#f59e0b"
+                  weight={6}
+                  opacity={0.8}
+                />
+              )}
+            </MapContainer>
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                <p className="text-gray-600">Loading your location...</p>
+              </div>
+            </div>
+          )}
+        </div>
 
-                  <div className="mt-3 flex items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      className="px-3 py-1.5 rounded-md text-sm font-semibold bg-white border border-black/15 hover:bg-black/5"
-                      onClick={() => {
-                        setNeedsPopupOpen(false);
-                        setNeedsPopupDismissed(true);
-                        userMarkerRef.current?.closePopup();
-                      }}
-                    >
-                      Close
-                    </button>
-                    <button
-                      type="button"
-                      className="px-3 py-1.5 rounded-md text-sm font-semibold bg-green-600 text-white hover:bg-green-700"
-                      onClick={() => {
-                        // UI-only for now (hook up to backend later if needed)
-                        setNeedsPopupOpen(false);
-                        userMarkerRef.current?.closePopup();
-                      }}
-                    >
-                      Save
-                    </button>
+        {/* Sidebar */}
+        <div className="w-96 bg-white shadow-xl flex flex-col overflow-y-auto">
+          {/* Supply Request CTA */}
+          {!requestConfirmed && (
+            <div className="p-6 bg-gradient-to-br from-red-500 to-red-600 text-white">
+              <h2 className="text-xl font-bold mb-2">Need Emergency Supplies?</h2>
+              <p className="text-red-100 text-sm mb-4">
+                Request assistance and get routed to the nearest relief centre
+              </p>
+              <button
+                onClick={handleSupplyRequest}
+                className="w-full bg-white text-red-600 font-bold py-3 px-4 rounded-lg shadow-lg hover:bg-red-50 transition transform hover:scale-105"
+              >
+                🆘 Request Supplies
+              </button>
+            </div>
+          )}
+
+          {/* Route Information */}
+          {requestConfirmed && nearestReliefCentre && (
+            <div className="p-6 border-b">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-2xl">✅</span>
+                <h2 className="text-xl font-bold text-gray-800">Request Confirmed</h2>
+              </div>
+              
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                <h3 className="font-bold text-green-800 mb-2">
+                  {nearestReliefCentre.relief_centre.name}
+                </h3>
+                <div className="space-y-1 text-sm text-green-700">
+                  <div>
+                    <span className="font-semibold">Distance: </span>
+                    {nearestReliefCentre.distance_formatted}
+                  </div>
+                  <div>
+                    <span className="font-semibold">Travel Time: </span>
+                    {nearestReliefCentre.duration_formatted}
+                  </div>
+                  {nearestReliefCentre.relief_centre.capacity && (
+                    <div>
+                      <span className="font-semibold">Capacity: </span>
+                      {nearestReliefCentre.relief_centre.capacity} people
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Selected Supplies */}
+              <div className="mb-4">
+                <h3 className="font-semibold text-gray-700 mb-2">Requested Supplies:</h3>
+                <div className="flex flex-wrap gap-2">
+                  {selectedSupplies.map((supplyId) => {
+                    const supply = SUPPLIES.find((s) => s.id === supplyId);
+                    return supply ? (
+                      <span
+                        key={supplyId}
+                        className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm"
+                      >
+                        {supply.icon} {supply.name}
+                      </span>
+                    ) : null;
+                  })}
+                </div>
+              </div>
+
+              {/* Route Weather Summary */}
+              {routeWeather && routeWeather.summary && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                  <h3 className="font-semibold text-blue-800 mb-2">Route Weather</h3>
+                  <div className="text-sm text-blue-700 space-y-1">
+                    {routeWeather.summary.avg_temperature !== null && (
+                      <div>Avg Temp: {routeWeather.summary.avg_temperature}°C</div>
+                    )}
+                    {routeWeather.summary.max_rainfall !== null && routeWeather.summary.max_rainfall > 0 && (
+                      <div className="text-orange-600">
+                        ⚠️ Max Rainfall: {routeWeather.summary.max_rainfall}mm/h
+                      </div>
+                    )}
+                    {routeWeather.summary.has_alerts && (
+                      <div className="text-red-600 font-semibold">⚠️ Weather Alerts Active</div>
+                    )}
                   </div>
                 </div>
-              </Popup>
-            </Marker>
+              )}
 
-            {accuracyMeters && accuracyMeters > 0 ? (
-              <Circle
-                center={userLocation!}
-                radius={accuracyMeters}
-                pathOptions={{ color: "#22c55e", fillColor: "#22c55e", fillOpacity: 0.12 }}
-              />
-            ) : null}
+              {/* Directions Toggle */}
+              <button
+                onClick={() => setShowDirections(!showDirections)}
+                className="w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition mb-4"
+              >
+                {showDirections ? "Hide" : "Show"} Step-by-Step Directions
+              </button>
+            </div>
+          )}
 
-            {/* Relief centres */}
-            {reliefCentres.map((c) => {
-              const isNearest = nearest?.relief_centre.id === c.id;
-              return (
-                <Marker
-                  key={c.id}
-                  position={[c.latitude, c.longitude]}
-                  icon={isNearest ? nearestReliefCentreIcon : reliefCentreIcon}
-                >
-                  <Popup>
-                    <div className="text-sm">
-                      <div className="font-semibold">{c.name}</div>
-                      {typeof c.capacity === "number" ? (
-                        <div>Capacity: {c.capacity}</div>
-                      ) : null}
-                      {isNearest ? (
-                        <div className="font-semibold text-orange-600">Nearest centre</div>
-                      ) : null}
+          {/* Google Maps Style Step-by-Step Directions */}
+          {showDirections && directions.length > 0 && (
+            <div className="border-t bg-white">
+              <div className="sticky top-0 bg-white border-b px-4 py-3 z-10">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-gray-800 text-lg">Directions</h3>
+                  <button
+                    onClick={() => setShowDirections(false)}
+                    className="text-gray-500 hover:text-gray-700"
+                  >
+                    ✕
+                  </button>
+                </div>
+                {routeData && (
+                  <div className="text-sm text-gray-600 mt-1">
+                    {routeData.summary.distance_formatted} • {routeData.summary.duration_formatted}
+                  </div>
+                )}
+              </div>
+              
+              <div className="overflow-y-auto max-h-96">
+                {directions.map((direction, index) => (
+                  <div
+                    key={index}
+                    className={`flex items-start gap-4 px-4 py-3 border-b border-gray-100 hover:bg-gray-50 transition ${
+                      index === 0 ? "bg-blue-50" : ""
+                    }`}
+                  >
+                    {/* Step Number & Icon */}
+                    <div className="flex-shrink-0">
+                      {index === 0 ? (
+                        <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-sm">
+                          {direction.step}
+                        </div>
+                      ) : index === directions.length - 1 ? (
+                        <div className="w-8 h-8 rounded-full bg-green-600 text-white flex items-center justify-center font-bold text-sm">
+                          {direction.step}
+                        </div>
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-gray-200 text-gray-700 flex items-center justify-center font-bold text-sm">
+                          {direction.step}
+                        </div>
+                      )}
                     </div>
-                  </Popup>
-                </Marker>
-              );
-            })}
+                    
+                    {/* Direction Icon */}
+                    <div className="flex-shrink-0 text-2xl w-8 h-8 flex items-center justify-center">
+                      {direction.icon}
+                    </div>
+                    
+                    {/* Instruction & Distance */}
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-gray-900 text-sm">
+                        {direction.instruction}
+                      </div>
+                      {index < directions.length - 1 && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          {direction.distance}
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Distance Badge */}
+                    {index < directions.length - 1 && (
+                      <div className="flex-shrink-0">
+                        <div className="bg-gray-100 text-gray-700 text-xs font-semibold px-2 py-1 rounded">
+                          {direction.distance}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              
+              {/* Summary Footer */}
+              {routeData && (
+                <div className="bg-blue-50 border-t px-4 py-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="text-gray-700">
+                      <span className="font-semibold">Total:</span> {routeData.summary.distance_formatted}
+                    </div>
+                    <div className="text-gray-700">
+                      <span className="font-semibold">Time:</span> {routeData.summary.duration_formatted}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
-            {/* Route to nearest */}
-            {routePolyline.length > 0 ? (
-              <Polyline
-                positions={routePolyline}
-                color="#f59e0b"
-                weight={5}
-                opacity={0.75}
-              />
-            ) : null}
-          </MapContainer>
-        ) : (
-          <div className="h-full w-full flex items-center justify-center">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-              <p className="text-black/70">Loading your location…</p>
-              <p className="text-xs text-black/50 mt-2">
-                Tip: Geolocation requires a secure context (HTTPS) or localhost.
+          {/* Weather Alerts */}
+          {weather && weather.alerts && weather.alerts.length > 0 && (
+            <div className="p-6 border-t bg-yellow-50">
+              <h3 className="font-bold text-yellow-800 mb-2">⚠️ Weather Alerts</h3>
+              {weather.alerts.map((alert, index) => (
+                <div key={index} className="bg-yellow-100 border border-yellow-300 rounded p-2 mb-2">
+                  <div className="font-semibold text-yellow-800">{alert.event}</div>
+                  <div className="text-sm text-yellow-700">{alert.description}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Error Display */}
+          {error && (
+            <div className="p-6 border-t bg-red-50">
+              <div className="bg-red-100 border border-red-300 rounded p-3">
+                <p className="text-red-800 text-sm">{error}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Loading Indicator */}
+          {loading && (
+            <div className="p-6 border-t">
+              <div className="flex items-center gap-2 text-blue-600">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                <span className="text-sm">Processing request...</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Supply Selection Modal */}
+      {showSupplyModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-4" style={{ zIndex: 9999 }}>
+          <div className="bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto relative" style={{ zIndex: 10000 }}>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-2xl font-bold text-gray-800">Select Supplies Needed</h2>
+                <button
+                  onClick={() => {
+                    setShowSupplyModal(false);
+                    setSelectedSupplies([]);
+                  }}
+                  className="text-gray-500 hover:text-gray-700 text-2xl font-bold leading-none"
+                  style={{ zIndex: 10001 }}
+                >
+                  ×
+                </button>
+              </div>
+              
+              <p className="text-gray-600 mb-4">
+                Select all supplies you need. You will be routed to the nearest relief centre.
               </p>
+              
+              <div className="grid grid-cols-2 gap-3 mb-6">
+                {SUPPLIES.map((supply) => (
+                  <button
+                    key={supply.id}
+                    onClick={() => toggleSupply(supply.id)}
+                    className={`p-4 rounded-lg border-2 transition relative ${
+                      selectedSupplies.includes(supply.id)
+                        ? "border-blue-500 bg-blue-50"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
+                    style={{ zIndex: 10001 }}
+                  >
+                    <div className="text-3xl mb-2">{supply.icon}</div>
+                    <div className="font-semibold text-sm text-gray-800">{supply.name}</div>
+                  </button>
+                ))}
+              </div>
+              
+              <div className="flex gap-3 relative" style={{ zIndex: 10001 }}>
+                <button
+                  onClick={() => {
+                    setShowSupplyModal(false);
+                    setSelectedSupplies([]);
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-800 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmRequest}
+                  disabled={selectedSupplies.length === 0}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed font-semibold"
+                >
+                  Continue
+                </button>
+              </div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {showConfirmation && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[10000] p-4" style={{ zIndex: 10000 }}>
+          <div className="bg-white rounded-lg shadow-2xl max-w-md w-full relative" style={{ zIndex: 10001 }}>
+            <div className="p-6">
+              <h2 className="text-2xl font-bold text-gray-800 mb-4">Confirm Request</h2>
+              
+              <p className="text-gray-600 mb-4">
+                You have selected {selectedSupplies.length} supply type(s). We will route you to the nearest relief centre.
+              </p>
+              
+              <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                <div className="text-sm font-semibold mb-2 text-gray-800">Selected Supplies:</div>
+                <div className="space-y-1">
+                  {selectedSupplies.map((supplyId) => {
+                    const supply = SUPPLIES.find((s) => s.id === supplyId);
+                    return supply ? (
+                      <div key={supplyId} className="text-sm text-gray-700">
+                        {supply.icon} {supply.name}
+                      </div>
+                    ) : null;
+                  })}
+                </div>
+              </div>
+              
+              <div className="flex gap-3 relative" style={{ zIndex: 10002 }}>
+                <button
+                  onClick={() => {
+                    setShowConfirmation(false);
+                  }}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-800 font-semibold"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleFinalConfirm}
+                  className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold"
+                >
+                  ✅ Confirm & Route
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-

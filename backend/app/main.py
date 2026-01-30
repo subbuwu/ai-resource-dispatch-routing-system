@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.routers import route, relief_centre
+from app.routers import route, relief_centre, weather
 from app.database import init_db
 
 
@@ -32,6 +32,7 @@ app.add_middleware(
 
 app.include_router(route.router)
 app.include_router(relief_centre.router)
+app.include_router(weather.router)
 
 @app.get("/health")
 def health_check():
