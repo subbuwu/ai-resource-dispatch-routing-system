@@ -474,8 +474,8 @@ export default function NeedHelpPage() {
         <div className="flex-1 relative">
           {/* Weather & Safety Banner - positioned near user location */}
           {userLocation && weather && showWeatherBanner && (
-            <div 
-              className="absolute top-4 left-4 z-1000 max-w-md"
+            <div      
+              className="absolute top-4 left-15 z-1000 max-w-md"
             >
               <div className={`rounded-lg shadow-2xl border-2 p-4 backdrop-blur-sm ${
                 weather.safety_status === "unsafe" 
