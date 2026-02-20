@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
-
-const BACKEND_URL = "http://localhost:8000";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import { apiRequest, acceptRequest, updateRequestStatus, updateDispatchLocation, getMyActiveDispatch } from "@/lib/api";
 
 // Supply id -> label for display (match Need Help page)
 const SUPPLY_LABELS: Record<string, string> = {
@@ -18,17 +18,17 @@ const SUPPLY_LABELS: Record<string, string> = {
 };
 
 interface ReliefCentre {
-  id: number;
+  id: string;
   name: string;
   latitude: number;
   longitude: number;
-  capacity: number | null;
-  status: string;
 }
 
 interface ReliefRequest {
-  id: number;
-  relief_centre_id: number;
+  id: string;
+  relief_centre_id: string;
+  requester_name: string;
+  requester_phone: string;
   latitude: number;
   longitude: number;
   supplies: string[];
@@ -36,30 +36,33 @@ interface ReliefRequest {
   created_at: string;
 }
 
-export default function VolunteerPage() {
+const POLL_INTERVAL_MS = 5000;
+
+function VolunteerPageContent() {
   const [centres, setCentres] = useState<ReliefCentre[]>([]);
-  const [selectedCentreId, setSelectedCentreId] = useState<number | null>(null);
+  const [selectedCentreId, setSelectedCentreId] = useState<string | null>(null);
   const [requests, setRequests] = useState<ReliefRequest[]>([]);
   const [loadingCentres, setLoadingCentres] = useState(true);
   const [loadingRequests, setLoadingRequests] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const [myDispatchId, setMyDispatchId] = useState<string | null>(null);
+  const [myRequestId, setMyRequestId] = useState<string | null>(null);
+  const [statusUpdating, setStatusUpdating] = useState(false);
+  const [locationSharing, setLocationSharing] = useState(false);
+  const locationWatchRef = useRef<number | null>(null);
 
   const fetchCentres = useCallback(async () => {
     setLoadingCentres(true);
     setError(null);
     try {
-      const res = await fetch(`${BACKEND_URL}/relief-centres/`);
-      if (res.ok) {
-        const data = await res.json();
-        setCentres(data);
-        if (data.length > 0) {
-          setSelectedCentreId((prev) => prev ?? data[0].id);
-        }
-      } else {
-        setError("Failed to load relief centres");
+      const data = await apiRequest<ReliefCentre[]>("/relief-centres/");
+      setCentres(data);
+      if (data.length > 0) {
+        setSelectedCentreId((prev) => prev ?? data[0].id);
       }
-    } catch {
-      setError("Could not connect to server");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not connect to server");
     } finally {
       setLoadingCentres(false);
     }
@@ -69,32 +72,98 @@ export default function VolunteerPage() {
     fetchCentres();
   }, [fetchCentres]);
 
+  // Restore "my active dispatch" after refresh
+  useEffect(() => {
+    getMyActiveDispatch()
+      .then(({ request_id, dispatch_id }) => {
+        if (request_id && dispatch_id) {
+          setMyRequestId(request_id);
+          setMyDispatchId(dispatch_id);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const fetchRequests = useCallback(async () => {
+    if (!selectedCentreId) return;
+    setError(null);
+    try {
+      const data = await apiRequest<ReliefRequest[]>(`/relief-centres/${selectedCentreId}/requests`);
+      setRequests(data);
+    } catch {
+      setError("Failed to load requests");
+    } finally {
+      setLoadingRequests(false);
+    }
+  }, [selectedCentreId]);
+
   useEffect(() => {
     if (!selectedCentreId) {
       setRequests([]);
       return;
     }
-    let cancelled = false;
     setLoadingRequests(true);
-    setError(null);
-    fetch(`${BACKEND_URL}/relief-centres/${selectedCentreId}/requests`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to load requests");
-        return res.json();
-      })
-      .then((data: ReliefRequest[]) => {
-        if (!cancelled) setRequests(data);
-      })
-      .catch(() => {
-        if (!cancelled) setError("Failed to load requests");
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingRequests(false);
-      });
+    fetchRequests();
+  }, [selectedCentreId, fetchRequests]);
+
+  // Realtime polling: refresh requests every 5s
+  useEffect(() => {
+    if (!selectedCentreId) return;
+    const interval = setInterval(fetchRequests, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [selectedCentreId, fetchRequests]);
+
+  const handleAccept = async (requestId: string) => {
+    setAcceptingId(requestId);
+    try {
+      const res = await acceptRequest(requestId);
+      setMyDispatchId(res.dispatch_id);
+      setMyRequestId(res.request_id);
+      await fetchRequests();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to accept");
+    } finally {
+      setAcceptingId(null);
+    }
+  };
+
+  const handleStatus = async (requestId: string, status: "IN_PROGRESS" | "COMPLETED") => {
+    setStatusUpdating(true);
+    try {
+      await updateRequestStatus(requestId, status);
+      if (status === "COMPLETED") {
+        setLocationSharing(false);
+        if (locationWatchRef.current != null) {
+          navigator.geolocation.clearWatch(locationWatchRef.current);
+          locationWatchRef.current = null;
+        }
+        setMyDispatchId(null);
+        setMyRequestId(null);
+      }
+      await fetchRequests();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update status");
+    } finally {
+      setStatusUpdating(false);
+    }
+  };
+
+  // Share live location when IN_PROGRESS and locationSharing is on
+  useEffect(() => {
+    if (!locationSharing || !myDispatchId) return;
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        updateDispatchLocation(myDispatchId, pos.coords.latitude, pos.coords.longitude).catch(() => {});
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 10000 }
+    );
+    locationWatchRef.current = watchId;
     return () => {
-      cancelled = true;
+      navigator.geolocation.clearWatch(watchId);
+      locationWatchRef.current = null;
     };
-  }, [selectedCentreId]);
+  }, [locationSharing, myDispatchId]);
 
   const selectedCentre = centres.find((c) => c.id === selectedCentreId);
 
@@ -144,9 +213,6 @@ export default function VolunteerPage() {
                   }`}
                 >
                   {centre.name}
-                  {centre.capacity != null && (
-                    <span className="ml-2 text-slate-400">({centre.capacity} cap.)</span>
-                  )}
                 </button>
               ))}
             </div>
@@ -160,10 +226,6 @@ export default function VolunteerPage() {
             </h3>
             <div className="text-sm text-gray-600">
               <div>Location: {selectedCentre.latitude.toFixed(4)}, {selectedCentre.longitude.toFixed(4)}</div>
-              {selectedCentre.capacity != null && (
-                <div>Capacity: {selectedCentre.capacity} people</div>
-              )}
-              <div>Status: {selectedCentre.status}</div>
             </div>
           </section>
         )}
@@ -198,15 +260,22 @@ export default function VolunteerPage() {
                     </span>
                     <span
                       className={`text-xs font-medium px-2 py-1 rounded ${
-                        req.status === "pending"
+                        req.status === "PENDING"
                           ? "bg-amber-100 text-amber-800"
-                          : req.status === "in_progress"
+                          : req.status === "IN_PROGRESS"
                           ? "bg-blue-100 text-blue-800"
-                          : "bg-green-100 text-green-800"
+                          : req.status === "ACCEPTED"
+                          ? "bg-purple-100 text-purple-800"
+                          : req.status === "COMPLETED"
+                          ? "bg-green-100 text-green-800"
+                          : "bg-slate-100 text-slate-800"
                       }`}
                     >
-                      {req.status.replace("_", " ")}
+                      {req.status.replaceAll("_", " ")}
                     </span>
+                  </div>
+                  <div className="text-sm text-gray-700 mb-1">
+                    <strong>{req.requester_name}</strong> · {req.requester_phone}
                   </div>
                   <div className="text-sm text-gray-600 mb-2">
                     Location: {req.latitude.toFixed(4)}, {req.longitude.toFixed(4)}
@@ -221,6 +290,66 @@ export default function VolunteerPage() {
                       </span>
                     ))}
                   </div>
+                  {req.status === "PENDING" && (
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => handleAccept(req.id)}
+                        disabled={acceptingId !== null || !!myRequestId}
+                        className="w-full py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {acceptingId === req.id ? "Accepting…" : "Accept request"}
+                      </button>
+                    </div>
+                  )}
+                  {req.status === "ACCEPTED" && myRequestId === req.id && (
+                    <div className="mt-3 space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => handleStatus(req.id, "IN_PROGRESS")}
+                        disabled={statusUpdating}
+                        className="w-full py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        Start trip
+                      </button>
+                      <a
+                        href={`https://www.google.com/maps/dir/?api=1&destination=${req.latitude},${req.longitude}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block w-full py-2 text-center bg-slate-100 text-slate-800 rounded-lg font-medium hover:bg-slate-200"
+                      >
+                        Open in Google Maps
+                      </a>
+                    </div>
+                  )}
+                  {req.status === "IN_PROGRESS" && myRequestId === req.id && (
+                    <div className="mt-3 space-y-2">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={locationSharing}
+                          onChange={(e) => setLocationSharing(e.target.checked)}
+                        />
+                        Share my location with requester
+                      </label>
+                      <a
+                        href={`https://www.google.com/maps/dir/?api=1&destination=${req.latitude},${req.longitude}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block w-full py-2 text-center bg-slate-100 text-slate-800 rounded-lg font-medium hover:bg-slate-200"
+                      >
+                        Navigate (Google Maps)
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => handleStatus(req.id, "COMPLETED")}
+                        disabled={statusUpdating}
+                        className="w-full py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50"
+                      >
+                        Mark completed
+                      </button>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -228,5 +357,13 @@ export default function VolunteerPage() {
         </section>
       </main>
     </div>
+  );
+}
+
+export default function VolunteerPage() {
+  return (
+    <ProtectedRoute requireVolunteer>
+      <VolunteerPageContent />
+    </ProtectedRoute>
   );
 }

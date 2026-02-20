@@ -16,9 +16,18 @@ typing_extensions==4.15.0
 urllib3==2.6.2
 uvicorn==0.40.0
 
-# Relief Centres: SQLite database (lightweight, no setup required)
+# Database: PostgreSQL with PostGIS support
 sqlalchemy>=2.0.25
+psycopg2-binary>=2.9.9
+geoalchemy2>=0.15.0
 python-dotenv==1.0.0
+
+# Database migrations (Alembic)
+alembic>=1.13.0
+
+# Password hashing
+passlib[bcrypt]>=1.7.4
+python-jose[cryptography]>=3.3.0
 
 # Weather API integration
 # OpenWeatherMap API is used via requests library (already included above)

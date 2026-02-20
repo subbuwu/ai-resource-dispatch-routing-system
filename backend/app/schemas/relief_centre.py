@@ -2,8 +2,8 @@
 Schemas for relief centre API endpoints
 """
 from pydantic import BaseModel
-from typing import Optional, Dict, Any, List
-from app.database import ReliefCentreStatus
+from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 
 class ReliefCentreBase(BaseModel):
@@ -11,8 +11,6 @@ class ReliefCentreBase(BaseModel):
     name: str
     latitude: float
     longitude: float
-    capacity: Optional[int] = None
-    status: ReliefCentreStatus = ReliefCentreStatus.ACTIVE
 
 
 class ReliefCentreCreate(ReliefCentreBase):
@@ -22,7 +20,7 @@ class ReliefCentreCreate(ReliefCentreBase):
 
 class ReliefCentreResponse(ReliefCentreBase):
     """Schema for relief centre response"""
-    id: int
+    id: UUID
     
     class Config:
         from_attributes = True
@@ -44,22 +42,54 @@ class NearestReliefCentreResponse(BaseModel):
     duration_formatted: str
 
 
-# Relief request schemas (for volunteers to see requests at their centre)
+# Relief request: created by requester (device_id), no auth
 class ReliefRequestCreate(BaseModel):
-    """Schema for creating a relief request (when user confirms on Need Help page)"""
-    relief_centre_id: int
+    """Requester submits with device_id (from localStorage)."""
+    device_id: str
+    relief_centre_id: UUID
     latitude: float
     longitude: float
     supplies: List[str]
 
 
 class ReliefRequestResponse(BaseModel):
-    """Schema for a single relief request"""
-    id: int
-    relief_centre_id: int
+    """Single relief request for volunteer view."""
+    id: UUID
+    relief_centre_id: UUID
+    requester_name: str
+    requester_phone: str
     latitude: float
     longitude: float
     supplies: List[str]
     status: str
     created_at: str
+
+
+class RequestStatusUpdate(BaseModel):
+    """Volunteer updates request status (IN_PROGRESS, COMPLETED)."""
+    status: str  # IN_PROGRESS | COMPLETED
+
+
+class DispatchLocationUpdate(BaseModel):
+    """Volunteer sends current GPS for live tracking."""
+    latitude: float
+    longitude: float
+
+
+class TrackingResponse(BaseModel):
+    """For victim: request status + volunteer location + route/ETA."""
+    request_id: UUID
+    status: str
+    requester_name: Optional[str] = None
+    requester_phone: Optional[str] = None
+    victim_latitude: float
+    victim_longitude: float
+    relief_centre_id: UUID
+    relief_centre_name: Optional[str] = None
+    volunteer_name: Optional[str] = None
+    volunteer_latitude: Optional[float] = None
+    volunteer_longitude: Optional[float] = None
+    location_updated_at: Optional[str] = None
+    route_to_victim: Optional[Dict[str, Any]] = None  # OSRM route from volunteer to victim
+    eta_minutes: Optional[float] = None
 

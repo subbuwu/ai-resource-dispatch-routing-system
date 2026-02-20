@@ -5,6 +5,9 @@ import Link from "next/link";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { apiRequest, getTracking, type TrackingData } from "@/lib/api";
+import { hasRequesterSession, getDeviceId } from "@/lib/requester";
+import RequesterFormModal from "@/components/RequesterFormModal";
 
 // Fix for default marker icons in Next.js
 delete (L.Icon.Default.prototype as unknown as { _getIconUrl: unknown })._getIconUrl;
@@ -42,6 +45,15 @@ const nearestReliefCentreIcon = new L.Icon({
   shadowSize: [60, 60],
 });
 
+const volunteerIcon = new L.Icon({
+  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-violet.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+  iconSize: [30, 50],
+  iconAnchor: [15, 50],
+  popupAnchor: [1, -34],
+  shadowSize: [50, 50],
+});
+
 // Component to handle map bounds
 function MapBounds({ bounds }: { bounds: L.LatLngBounds | null }) {
   const map = useMap();
@@ -54,8 +66,6 @@ function MapBounds({ bounds }: { bounds: L.LatLngBounds | null }) {
   
   return null;
 }
-
-const BACKEND_URL = "http://localhost:8000";
 
 // Available supplies
 const SUPPLIES = [
@@ -88,12 +98,10 @@ interface RouteResponse {
 }
 
 interface ReliefCentre {
-  id: number;
+  id: string;
   name: string;
   latitude: number;
   longitude: number;
-  capacity: number | null;
-  status: string;
 }
 
 interface NearestReliefCentreResponse {
@@ -132,7 +140,7 @@ interface RouteWeatherData {
   summary?: RouteWeatherSummary;
 }
 
-export default function NeedHelpPage() {
+function NeedHelpPageContent() {
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [routeData, setRouteData] = useState<RouteResponse | null>(null);
   const [nearestReliefCentre, setNearestReliefCentre] = useState<NearestReliefCentreResponse | null>(null);
@@ -152,8 +160,16 @@ export default function NeedHelpPage() {
   const [showDirections, setShowDirections] = useState(false);
   const [directions, setDirections] = useState<Array<{ step: number; instruction: string; distance: string; icon: string }>>([]);
   const [showWeatherBanner, setShowWeatherBanner] = useState(true);
-  
+
+  // Requester form (name/phone) when no device_id yet
+  const [showRequesterModal, setShowRequesterModal] = useState(false);
+  /** Created request id after successful submit (for tracking/polling) */
+  const [createdRequestId, setCreatedRequestId] = useState<string | null>(null);
+  /** Live tracking (volunteer on the way, ETA) */
+  const [trackingData, setTrackingData] = useState<TrackingData | null>(null);
+
   const weatherUpdateInterval = useRef<NodeJS.Timeout | null>(null);
+  const trackingPollInterval = useRef<NodeJS.Timeout | null>(null);
 
   // Get user's current location
   useEffect(() => {
@@ -185,11 +201,8 @@ export default function NeedHelpPage() {
   useEffect(() => {
     const fetchReliefCentres = async () => {
       try {
-        const response = await fetch(`${BACKEND_URL}/relief-centres/`);
-        if (response.ok) {
-          const centres = await response.json();
-          setReliefCentres(centres);
-        }
+        const centres = await apiRequest<ReliefCentre[]>("/relief-centres/");
+        setReliefCentres(centres);
       } catch (err) {
         console.error("Failed to fetch relief centres:", err);
       }
@@ -202,13 +215,10 @@ export default function NeedHelpPage() {
     if (!userLocation) return;
     
     try {
-      const response = await fetch(
-        `${BACKEND_URL}/weather/?latitude=${userLocation[0]}&longitude=${userLocation[1]}`
+      const data = await apiRequest<WeatherData>(
+        `/weather/?latitude=${userLocation[0]}&longitude=${userLocation[1]}`
       );
-      if (response.ok) {
-        const data: WeatherData = await response.json();
-        setWeather(data);
-      }
+      setWeather(data);
     } catch (err) {
       console.error("Failed to fetch weather:", err);
     }
@@ -219,15 +229,11 @@ export default function NeedHelpPage() {
     if (!routeData?.coordinates || routeData.coordinates.length === 0) return;
     
     try {
-      const response = await fetch(`${BACKEND_URL}/weather/route`, {
+      const data = await apiRequest<RouteWeatherData>("/weather/route", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ coordinates: routeData.coordinates }),
       });
-      if (response.ok) {
-        const data = await response.json();
-        setRouteWeather(data);
-      }
+      setRouteWeather(data);
     } catch (err) {
       console.error("Failed to fetch route weather:", err);
     }
@@ -261,6 +267,35 @@ export default function NeedHelpPage() {
     }
   }, [routeData, fetchRouteWeather]);
 
+  // Poll tracking when request is created (for victim to see volunteer on the way)
+  useEffect(() => {
+    const requestId = createdRequestId;
+    const deviceId = getDeviceId();
+    if (!requestId || !deviceId) return;
+    const poll = async () => {
+      try {
+        const data = await getTracking(requestId, deviceId);
+        setTrackingData(data);
+        if (data.status === "COMPLETED") {
+          if (trackingPollInterval.current) {
+            clearInterval(trackingPollInterval.current);
+            trackingPollInterval.current = null;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+    poll();
+    trackingPollInterval.current = setInterval(poll, 5000);
+    return () => {
+      if (trackingPollInterval.current) {
+        clearInterval(trackingPollInterval.current);
+        trackingPollInterval.current = null;
+      }
+    };
+  }, [createdRequestId]);
+
   // Handle supply request
   const handleSupplyRequest = () => {
     setShowSupplyModal(true);
@@ -282,58 +317,66 @@ export default function NeedHelpPage() {
     setShowConfirmation(true);
   };
 
-  const handleFinalConfirm = async () => {
+  const doSubmitRequest = async () => {
     if (!userLocation) {
-      setError("Location not available");
+      setError("Location not available.");
       return;
     }
-
+    const deviceId = getDeviceId();
+    if (!deviceId) {
+      setError("Please complete your details first.");
+      return;
+    }
     setLoading(true);
     setError(null);
-
     try {
-      // Find nearest relief centre
-      const response = await fetch(`${BACKEND_URL}/relief-centres/nearest`, {
+      const nearestData = await apiRequest<NearestReliefCentreResponse>("/relief-centres/nearest", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           latitude: userLocation[0],
           longitude: userLocation[1],
         }),
       });
+      setNearestReliefCentre(nearestData);
+      setRouteData(nearestData.route);
 
-      if (!response.ok) {
-        throw new Error("Failed to find nearest relief centre");
-      }
-
-      const data: NearestReliefCentreResponse = await response.json();
-      setNearestReliefCentre(data);
-      setRouteData(data.route);
-
-      // Persist request so volunteers at the centre can see it
-      await fetch(`${BACKEND_URL}/relief-centres/requests`, {
+      const createRes = await apiRequest<{ id: string }>("/relief-centres/requests", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          relief_centre_id: data.relief_centre.id,
+          device_id: deviceId,
+          relief_centre_id: nearestData.relief_centre.id,
           latitude: userLocation[0],
           longitude: userLocation[1],
           supplies: selectedSupplies,
         }),
       });
-
-      // Generate simple directions
-      generateDirections(data.route, data.relief_centre.name);
-
+      setCreatedRequestId(createRes.id);
+      generateDirections(nearestData.route, nearestData.relief_centre.name);
       setRequestConfirmed(true);
       setShowSupplyModal(false);
       setShowConfirmation(false);
+      setShowRequesterModal(false);
       setShowDirections(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to process request");
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFinalConfirm = () => {
+    if (!userLocation) {
+      setError("Location not available");
+      return;
+    }
+    setShowConfirmation(false);
+    if (!hasRequesterSession()) {
+      setShowSupplyModal(false);
+      setShowRequesterModal(true);
+      return;
+    }
+    setShowSupplyModal(false);
+    doSubmitRequest();
   };
 
   // Generate Google Maps-style step-by-step directions
@@ -387,26 +430,32 @@ export default function NeedHelpPage() {
     setDirections(steps);
   };
 
-  // Calculate map bounds
+  // Calculate map bounds (include volunteer location when tracking)
   const getBounds = (): L.LatLngBounds | null => {
     if (!userLocation) return null;
-    
     const points: L.LatLng[] = [L.latLng(userLocation[0], userLocation[1])];
-    
     if (routeData) {
       routeData.coordinates.forEach(([lng, lat]) => {
         points.push(L.latLng(lat, lng));
       });
     }
-    
+    if (trackingData?.volunteer_latitude != null && trackingData?.volunteer_longitude != null) {
+      points.push(L.latLng(trackingData.volunteer_latitude, trackingData.volunteer_longitude));
+    }
+    if (trackingData?.route_to_victim?.coordinates?.length) {
+      trackingData.route_to_victim.coordinates.forEach(([lng, lat]) => {
+        points.push(L.latLng(lat, lng));
+      });
+    }
     reliefCentres.forEach((centre) => {
       points.push(L.latLng(centre.latitude, centre.longitude));
     });
-    
     return L.latLngBounds(points);
   };
 
   const routeCoordinates = routeData?.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]) || [];
+  const volunteerRouteCoordinates =
+    trackingData?.route_to_victim?.coordinates?.map(([lng, lat]) => [lat, lng] as [number, number]) || [];
 
   // Get weather icon URL
   const getWeatherIconUrl = (icon: string) => {
@@ -591,7 +640,6 @@ export default function NeedHelpPage() {
                     <Popup>
                       <div>
                         <strong>{centre.name}</strong>
-                        {centre.capacity && <div>Capacity: {centre.capacity} people</div>}
                         {isNearest && (
                           <div className="text-orange-600 font-semibold mt-1">
                             ⭐ Nearest Centre
@@ -603,13 +651,36 @@ export default function NeedHelpPage() {
                 );
               })}
               
-              {/* Route polyline */}
+              {/* Route polyline (victim to relief centre) */}
               {routeCoordinates.length > 0 && (
                 <Polyline
                   positions={routeCoordinates}
                   color="#f59e0b"
                   weight={6}
                   opacity={0.8}
+                />
+              )}
+              {/* Volunteer live location + route to victim */}
+              {trackingData?.volunteer_latitude != null && trackingData?.volunteer_longitude != null && (
+                <Marker
+                  position={[trackingData.volunteer_latitude, trackingData.volunteer_longitude]}
+                  icon={volunteerIcon}
+                >
+                  <Popup>
+                    <strong>Volunteer</strong>
+                    {trackingData.volunteer_name && <div>{trackingData.volunteer_name}</div>}
+                    {trackingData.eta_minutes != null && (
+                      <div className="text-sm">ETA ~{Math.round(trackingData.eta_minutes)} min</div>
+                    )}
+                  </Popup>
+                </Marker>
+              )}
+              {volunteerRouteCoordinates.length > 0 && (
+                <Polyline
+                  positions={volunteerRouteCoordinates}
+                  color="#7c3aed"
+                  weight={5}
+                  opacity={0.9}
                 />
               )}
             </MapContainer>
@@ -649,6 +720,38 @@ export default function NeedHelpPage() {
             </div>
           )}
 
+          {/* Live tracking: volunteer on the way / completed */}
+          {requestConfirmed && trackingData && (trackingData.status === "ACCEPTED" || trackingData.status === "IN_PROGRESS") && (
+            <div className="p-4 border-b bg-violet-50 border-violet-200">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-2xl">🚗</span>
+                <h2 className="text-lg font-bold text-violet-900">Volunteer on the way</h2>
+              </div>
+              {trackingData.volunteer_name && (
+                <p className="text-sm text-violet-800 mb-1">{trackingData.volunteer_name} is heading to you</p>
+              )}
+              {trackingData.eta_minutes != null && (
+                <p className="text-sm font-semibold text-violet-900">
+                  ETA ~{Math.round(trackingData.eta_minutes)} min
+                </p>
+              )}
+              {trackingData.route_to_victim?.summary && (
+                <p className="text-xs text-violet-700 mt-1">
+                  {trackingData.route_to_victim.summary.distance_formatted} · {trackingData.route_to_victim.summary.duration_formatted}
+                </p>
+              )}
+            </div>
+          )}
+          {requestConfirmed && trackingData?.status === "COMPLETED" && (
+            <div className="p-4 border-b bg-green-50 border-green-200">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">✔️</span>
+                <h2 className="text-lg font-bold text-green-800">Help completed</h2>
+              </div>
+              <p className="text-sm text-green-700 mt-1">The volunteer has marked this request as completed.</p>
+            </div>
+          )}
+
           {/* Route Information */}
           {requestConfirmed && nearestReliefCentre && (
             <div className="p-6 border-b">
@@ -670,12 +773,6 @@ export default function NeedHelpPage() {
                     <span className="font-semibold">Travel Time: </span>
                     {nearestReliefCentre.duration_formatted}
                   </div>
-                  {nearestReliefCentre.relief_centre.capacity && (
-                    <div>
-                      <span className="font-semibold">Capacity: </span>
-                      {nearestReliefCentre.relief_centre.capacity} people
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -950,7 +1047,8 @@ export default function NeedHelpPage() {
                   Back
                 </button>
                 <button
-                  onClick={handleFinalConfirm}
+                  type="button"
+                  onClick={() => handleFinalConfirm()}
                   className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold"
                 >
                   ✅ Confirm & Route
@@ -960,6 +1058,21 @@ export default function NeedHelpPage() {
           </div>
         </div>
       )}
+
+      <RequesterFormModal
+        open={showRequesterModal}
+        onClose={() => {
+          setShowRequesterModal(false);
+        }}
+        onSuccess={() => {
+          doSubmitRequest();
+        }}
+        loading={loading}
+      />
     </div>
   );
+}
+
+export default function NeedHelpPage() {
+  return <NeedHelpPageContent />;
 }

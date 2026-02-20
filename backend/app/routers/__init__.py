@@ -1,5 +1,4 @@
-# Router modules
-from app.routers import route, relief_centre, weather
+from app.routers import auth, requesters, route, relief_centre, weather, admin
 
-__all__ = ["route", "relief_centre", "weather"]
+__all__ = ["auth", "requesters", "route", "relief_centre", "weather", "admin"]
 

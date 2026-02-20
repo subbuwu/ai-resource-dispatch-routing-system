@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { apiRequest } from "@/lib/api";
 
 // Fix for default marker icons in Next.js
 delete (L.Icon.Default.prototype as unknown as { _getIconUrl: unknown })._getIconUrl;
@@ -121,12 +122,10 @@ interface RouteResponse {
 }
 
 interface ReliefCentre {
-  id: number;
+  id: string;
   name: string;
   latitude: number;
   longitude: number;
-  capacity: number | null;
-  status: string;
 }
 
 type ReliefSupplyType = "food" | "clothes" | "medicine";
@@ -192,9 +191,7 @@ interface NearestReliefCentreResponse {
   duration_formatted: string;
 }
 
-const BACKEND_URL = "http://localhost:8000";
-
-export default function RoutePage() {
+function RoutePageContent() {
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [destination, setDestination] = useState<[number, number] | null>(null);
   const [routeData, setRouteData] = useState<RouteResponse | null>(null);
@@ -212,13 +209,8 @@ export default function RoutePage() {
     const fetchReliefCentres = async () => {
       setLoadingReliefCentres(true);
       try {
-        const response = await fetch(`${BACKEND_URL}/relief-centres/`);
-        if (response.ok) {
-          const centres = await response.json();
-          setReliefCentres(centres);
-        } else {
-          console.error("Failed to fetch relief centres");
-        }
+        const centres = await apiRequest<ReliefCentre[]>("/relief-centres/");
+        setReliefCentres(centres);
       } catch (err) {
         console.error("Error fetching relief centres:", err);
       } finally {
@@ -265,23 +257,13 @@ export default function RoutePage() {
       const findNearest = async () => {
         try {
           setLoading(true);
-          const response = await fetch(`${BACKEND_URL}/relief-centres/nearest`, {
+          const data = await apiRequest<NearestReliefCentreResponse>("/relief-centres/nearest", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
             body: JSON.stringify({
               latitude: userLocation[0],
               longitude: userLocation[1],
             }),
           });
-
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
-          }
-
-          const data: NearestReliefCentreResponse = await response.json();
           setNearestReliefCentre(data);
           setRouteData(data.route);
           setDestination([data.relief_centre.latitude, data.relief_centre.longitude]);
@@ -317,11 +299,8 @@ export default function RoutePage() {
     setError(null);
 
     try {
-      const response = await fetch(`${BACKEND_URL}/route/`, {
+      const data = await apiRequest<RouteResponse>("/route/", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify({
           start_lat: userLocation[0],
           start_lng: userLocation[1],
@@ -329,13 +308,6 @@ export default function RoutePage() {
           end_lng: destination[1],
         }),
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
-      }
-
-      const data: RouteResponse = await response.json();
       setRouteData(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch route");
@@ -494,12 +466,6 @@ export default function RoutePage() {
                   <span className="font-semibold">Travel Time: </span>
                   {nearestReliefCentre.duration_formatted}
                 </div>
-                {nearestReliefCentre.relief_centre.capacity && (
-                  <div>
-                    <span className="font-semibold">Capacity: </span>
-                    {nearestReliefCentre.relief_centre.capacity} people
-                  </div>
-                )}
                 {RELIEF_SUPPLIES_BY_NAME[nearestReliefCentre.relief_centre.name]?.length ? (
                   <div>
                     <span className="font-semibold">Supplies: </span>
@@ -555,9 +521,6 @@ export default function RoutePage() {
                   <Popup>
                     <div className="text-sm text-black">
                       <strong className="block mb-1">{centre.name}</strong>
-                      {centre.capacity && (
-                        <div className="mb-1">Capacity: {centre.capacity}</div>
-                      )}
                       {supplies.length ? (
                         <div className="mb-1">
                           <span className="font-semibold">Supplies: </span>
@@ -632,5 +595,9 @@ export default function RoutePage() {
       </div>
     </div>
   );
+}
+
+export default function RoutePage() {
+  return <RoutePageContent />;
 }
 

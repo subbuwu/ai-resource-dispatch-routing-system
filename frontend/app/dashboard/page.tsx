@@ -5,6 +5,9 @@ import Link from "next/link";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { apiRequest } from "@/lib/api";
+import { hasRequesterSession, getDeviceId } from "@/lib/requester";
+import RequesterFormModal from "@/components/RequesterFormModal";
 
 // Fix for default marker icons in Next.js
 delete (L.Icon.Default.prototype as unknown as { _getIconUrl: unknown })._getIconUrl;
@@ -55,8 +58,6 @@ function MapBounds({ bounds }: { bounds: L.LatLngBounds | null }) {
   return null;
 }
 
-const BACKEND_URL = "http://localhost:8000";
-
 // Available supplies
 const SUPPLIES = [
   { id: "food", name: "Food & Water", icon: "🍽️" },
@@ -88,12 +89,10 @@ interface RouteResponse {
 }
 
 interface ReliefCentre {
-  id: number;
+  id: string;
   name: string;
   latitude: number;
   longitude: number;
-  capacity: number | null;
-  status: string;
 }
 
 interface NearestReliefCentreResponse {
@@ -132,7 +131,7 @@ interface RouteWeatherData {
   summary?: RouteWeatherSummary;
 }
 
-export default function DashboardPage() {
+function DashboardPageContent() {
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [routeData, setRouteData] = useState<RouteResponse | null>(null);
   const [nearestReliefCentre, setNearestReliefCentre] = useState<NearestReliefCentreResponse | null>(null);
@@ -152,6 +151,9 @@ export default function DashboardPage() {
   const [showDirections, setShowDirections] = useState(false);
   const [directions, setDirections] = useState<Array<{ step: number; instruction: string; distance: string; icon: string }>>([]);
   const [showWeatherBanner, setShowWeatherBanner] = useState(true);
+
+  const [showRequesterModal, setShowRequesterModal] = useState(false);
+  const [pendingSubmit, setPendingSubmit] = useState(false);
   
   const weatherUpdateInterval = useRef<NodeJS.Timeout | null>(null);
 
@@ -185,11 +187,8 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchReliefCentres = async () => {
       try {
-        const response = await fetch(`${BACKEND_URL}/relief-centres/`);
-        if (response.ok) {
-          const centres = await response.json();
-          setReliefCentres(centres);
-        }
+        const centres = await apiRequest<ReliefCentre[]>("/relief-centres/");
+        setReliefCentres(centres);
       } catch (err) {
         console.error("Failed to fetch relief centres:", err);
       }
@@ -202,13 +201,10 @@ export default function DashboardPage() {
     if (!userLocation) return;
     
     try {
-      const response = await fetch(
-        `${BACKEND_URL}/weather/?latitude=${userLocation[0]}&longitude=${userLocation[1]}`
+      const data = await apiRequest<WeatherData>(
+        `/weather/?latitude=${userLocation[0]}&longitude=${userLocation[1]}`
       );
-      if (response.ok) {
-        const data: WeatherData = await response.json();
-        setWeather(data);
-      }
+      setWeather(data);
     } catch (err) {
       console.error("Failed to fetch weather:", err);
     }
@@ -219,15 +215,11 @@ export default function DashboardPage() {
     if (!routeData?.coordinates || routeData.coordinates.length === 0) return;
     
     try {
-      const response = await fetch(`${BACKEND_URL}/weather/route`, {
+      const data = await apiRequest<RouteWeatherData>("/weather/route", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ coordinates: routeData.coordinates }),
       });
-      if (response.ok) {
-        const data = await response.json();
-        setRouteWeather(data);
-      }
+      setRouteWeather(data);
     } catch (err) {
       console.error("Failed to fetch route weather:", err);
     }
@@ -282,49 +274,33 @@ export default function DashboardPage() {
     setShowConfirmation(true);
   };
 
-  const handleFinalConfirm = async () => {
-    if (!userLocation) {
-      setError("Location not available");
-      return;
-    }
-
+  const doSubmitRequest = async () => {
+    if (!userLocation) return;
+    const deviceId = getDeviceId();
+    if (!deviceId) return;
     setLoading(true);
     setError(null);
-
     try {
-      // Find nearest relief centre
-      const response = await fetch(`${BACKEND_URL}/relief-centres/nearest`, {
+      const data = await apiRequest<NearestReliefCentreResponse>("/relief-centres/nearest", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           latitude: userLocation[0],
           longitude: userLocation[1],
         }),
       });
-
-      if (!response.ok) {
-        throw new Error("Failed to find nearest relief centre");
-      }
-
-      const data: NearestReliefCentreResponse = await response.json();
       setNearestReliefCentre(data);
       setRouteData(data.route);
-
-      // Persist request so volunteers at the centre can see it
-      await fetch(`${BACKEND_URL}/relief-centres/requests`, {
+      await apiRequest("/relief-centres/requests", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          device_id: deviceId,
           relief_centre_id: data.relief_centre.id,
           latitude: userLocation[0],
           longitude: userLocation[1],
           supplies: selectedSupplies,
         }),
       });
-
-      // Generate simple directions
       generateDirections(data.route, data.relief_centre.name);
-
       setRequestConfirmed(true);
       setShowSupplyModal(false);
       setShowConfirmation(false);
@@ -334,6 +310,19 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFinalConfirm = async () => {
+    if (!userLocation) {
+      setError("Location not available");
+      return;
+    }
+    if (!hasRequesterSession()) {
+      setShowRequesterModal(true);
+      setPendingSubmit(true);
+      return;
+    }
+    await doSubmitRequest();
   };
 
   // Generate Google Maps-style step-by-step directions
@@ -591,7 +580,6 @@ export default function DashboardPage() {
                     <Popup>
                       <div>
                         <strong>{centre.name}</strong>
-                        {centre.capacity && <div>Capacity: {centre.capacity} people</div>}
                         {isNearest && (
                           <div className="text-orange-600 font-semibold mt-1">
                             ⭐ Nearest Centre
@@ -670,12 +658,6 @@ export default function DashboardPage() {
                     <span className="font-semibold">Travel Time: </span>
                     {nearestReliefCentre.duration_formatted}
                   </div>
-                  {nearestReliefCentre.relief_centre.capacity && (
-                    <div>
-                      <span className="font-semibold">Capacity: </span>
-                      {nearestReliefCentre.relief_centre.capacity} people
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -960,6 +942,25 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      <RequesterFormModal
+        open={showRequesterModal}
+        onClose={() => {
+          setShowRequesterModal(false);
+          setPendingSubmit(false);
+        }}
+        onSuccess={() => {
+          if (pendingSubmit) {
+            setPendingSubmit(false);
+            doSubmitRequest();
+          }
+        }}
+        loading={loading}
+      />
     </div>
   );
+}
+
+export default function DashboardPage() {
+  return <DashboardPageContent />;
 }

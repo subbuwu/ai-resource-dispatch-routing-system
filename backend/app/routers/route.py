@@ -4,11 +4,13 @@ from app.services.osrm_service import get_route
 
 router = APIRouter(prefix="/route", tags=["Routing"])
 
+
 @router.post("/", response_model=RouteResponse)
 def compute_route(request: RouteRequest):
+    """Public: compute route between two points (OSRM)."""
     return get_route(
         request.start_lat,
         request.start_lng,
         request.end_lat,
-        request.end_lng
+        request.end_lng,
     )

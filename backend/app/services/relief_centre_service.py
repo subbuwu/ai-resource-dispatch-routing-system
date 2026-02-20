@@ -3,24 +3,14 @@ Service for finding nearest relief centre using OSRM routing
 """
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
-from app.database import ReliefCentre, ReliefCentreStatus
+from app.database import ReliefCenter
 from app.services.osrm_service import get_route
 import math
 
 
-def get_all_active_relief_centres(db: Session) -> List[ReliefCentre]:
-    """
-    Get all active relief centres from database
-    
-    Args:
-        db: Database session
-    
-    Returns:
-        List of active relief centres
-    """
-    return db.query(ReliefCentre).filter(
-        ReliefCentre.status == ReliefCentreStatus.ACTIVE
-    ).all()
+def get_all_relief_centres(db: Session) -> List[ReliefCenter]:
+    """Return all relief centres (for public list and nearest lookup)."""
+    return db.query(ReliefCenter).all()
 
 
 def calculate_haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -76,11 +66,9 @@ def find_nearest_relief_centre(
         ValueError: If no active relief centres found
         Exception: If OSRM routing fails
     """
-    # Get all active relief centres
-    centres = get_all_active_relief_centres(db)
-    
+    centres = get_all_relief_centres(db)
     if not centres:
-        raise ValueError("No active relief centres found")
+        raise ValueError("No relief centres found")
     
     # Calculate approximate distances using Haversine (for initial filtering)
     # This helps us prioritize which centres to check with OSRM
